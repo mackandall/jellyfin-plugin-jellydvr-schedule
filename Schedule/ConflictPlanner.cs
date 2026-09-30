@@ -19,7 +19,9 @@ public sealed record PlannedRecording(
     string? TimerId,
     string? SeriesTimerId,
     TimeSpan PadBefore,
-    TimeSpan PadAfter);
+    TimeSpan PadAfter,
+    bool IsRepeat = false,
+    bool OneOff = false);
 
 /// <summary>An alternative airing of the same episode that a recording could move to.</summary>
 public sealed record Airing(Guid ProgramId, Guid ChannelId, string ChannelName, DateTime Start, DateTime End);
@@ -33,7 +35,10 @@ public enum DecisionKind
     Skip,
 
     /// <summary>Overloaded, but every recording in the slot is already recording: nothing to do.</summary>
-    Unresolvable
+    Unresolvable,
+
+    /// <summary>The same episode is also scheduled at another time: this copy is dropped.</summary>
+    Duplicate
 }
 
 public sealed record Decision(
@@ -42,7 +47,8 @@ public sealed record Decision(
     Airing? MoveTo,
     DateTime SlotStart,
     DateTime SlotEnd,
-    IReadOnlyList<PlannedRecording> Competing);
+    IReadOnlyList<PlannedRecording> Competing,
+    PlannedRecording? KeptCopy = null);
 
 /// <summary>
 /// Finds the times when more recordings are scheduled than there are tuner inputs and decides,
@@ -52,20 +58,53 @@ public sealed record Decision(
 /// </summary>
 public static class ConflictPlanner
 {
+    /// <summary>
+    /// A guide id that identifies one episode or film (TMS "EP…"/"MV…"), as opposed to a whole show
+    /// ("SH…", used for news and talk shows without episode data), which must never be treated as
+    /// "the same episode".
+    /// </summary>
+    public static bool IsEpisodeId(string? showId) =>
+        showId is { Length: > 4 }
+        && (showId.StartsWith("EP", StringComparison.OrdinalIgnoreCase) || showId.StartsWith("MV", StringComparison.OrdinalIgnoreCase));
+
     public static List<Decision> Plan(
         IReadOnlyList<PlannedRecording> recordings,
         int capacity,
         bool moveToOtherAiring,
-        Func<PlannedRecording, IEnumerable<Airing>> alternatives)
+        Func<PlannedRecording, IEnumerable<Airing>> alternatives,
+        bool recordEachEpisodeOnce = false,
+        bool preferFirstRun = false)
     {
         var decisions = new List<Decision>();
+        var active = recordings.ToList();
+
+        // One copy per episode: keep one already recording, else a hand-picked one-off, else the
+        // first run (if preferred) or the earliest airing; drop the rest. Dropped airings stay
+        // available as places to move to if the kept one loses a conflict.
+        if (recordEachEpisodeOnce)
+        {
+            foreach (var group in active.Where(r => IsEpisodeId(r.ShowId)).GroupBy(r => r.ShowId!, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1).ToList())
+            {
+                var kept = group
+                    .OrderByDescending(r => r.Locked)
+                    .ThenByDescending(r => r.OneOff)
+                    .ThenBy(r => preferFirstRun && r.IsRepeat)
+                    .ThenBy(r => r.Start)
+                    .First();
+                foreach (var extra in group.Where(r => r != kept && !r.Locked))
+                {
+                    active.Remove(extra);
+                    decisions.Add(new Decision(DecisionKind.Duplicate, extra, null, extra.Start, extra.End, new[] { kept }, kept));
+                }
+            }
+        }
+
         if (capacity <= 0)
         {
             return decisions;
         }
 
-        var active = recordings.ToList();
-        var usedAirings = new HashSet<Guid>(recordings.Select(r => r.ProgramId));
+        var usedAirings = new HashSet<Guid>(active.Select(r => r.ProgramId));
         for (var guard = 0; guard < 200; guard++)
         {
             if (FirstOverload(active, capacity, DateTime.MinValue, DateTime.MaxValue) is not { } slot)
@@ -89,7 +128,10 @@ public static class ConflictPlanner
 
             active.Remove(loser);
             Airing? moveTo = null;
-            if (moveToOtherAiring)
+            // Only a real episode id says two airings are the same episode, and never move to
+            // an episode that is already being recorded at another time.
+            if (moveToOtherAiring && IsEpisodeId(loser.ShowId)
+                && !active.Any(r => string.Equals(r.ShowId, loser.ShowId, StringComparison.OrdinalIgnoreCase)))
             {
                 foreach (var airing in alternatives(loser).Where(a => !usedAirings.Contains(a.ProgramId)).OrderBy(a => a.Start))
                 {

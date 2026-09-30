@@ -26,6 +26,15 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Resolve a conflict by recording another airing of the same episode when one fits.</summary>
     public bool MoveToOtherAiring { get; set; } = true;
 
+    public const string KeepEarliest = "earliest";
+    public const string KeepFirstRun = "first-run";
+
+    /// <summary>When the same episode is scheduled more than once, record only one copy.</summary>
+    public bool RecordEachEpisodeOnce { get; set; } = true;
+
+    /// <summary>Which copy to keep: "earliest" airing, or "first-run" (a non-repeat airing if there is one).</summary>
+    public string KeepCopy { get; set; } = KeepEarliest;
+
     /// <summary>Series recordings (series timer ids), highest priority first.</summary>
     public string[] SeriesPriority { get; set; } = Array.Empty<string>();
 }

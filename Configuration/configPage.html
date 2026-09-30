@@ -65,6 +65,17 @@
                     <div class="checkboxContainer">
                         <label><input is="emby-checkbox" type="checkbox" id="DsMove" /><span>Move to another airing of the same episode when one fits</span></label>
                     </div>
+                    <div class="checkboxContainer">
+                        <label><input is="emby-checkbox" type="checkbox" id="DsOnce" /><span>Record each episode once (drop extra airings of an episode that is already scheduled)</span></label>
+                    </div>
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="DsKeep">Which copy to keep</label>
+                        <select is="emby-select" id="DsKeep" class="emby-select-withcolor emby-select">
+                            <option value="earliest">The earliest airing</option>
+                            <option value="first-run">The first run (a non-repeat airing if there is one)</option>
+                        </select>
+                        <div class="fieldDescription">A copy already recording, or one you scheduled by hand, is always the one kept.</div>
+                    </div>
                 </div>
 
                 <div>
@@ -116,21 +127,24 @@
             function render(s) {
                 var plan = s.Plan;
                 if (!plan) { page.querySelector("#DsSummary").textContent = "Not checked yet. Use Check now."; return; }
-                var todo = plan.Decisions.filter(function (d) { return d.Kind !== "Unresolvable"; }).length;
+                var dups = plan.Decisions.filter(function (d) { return d.Kind === "Duplicate"; }).length;
+                var todo = plan.Decisions.filter(function (d) { return d.Kind === "Move" || d.Kind === "Skip"; }).length;
                 page.querySelector("#DsSummary").textContent = plan.Scheduled + " recording(s) in the next days · " + plan.Capacity +
-                    " input(s) · " + (todo ? todo + " conflict(s) to resolve" : "no conflicts") +
+                    " input(s) · " + (todo ? todo + " conflict(s) to resolve" : "no conflicts") + (dups ? " · " + dups + " duplicate(s) to drop" : "") +
                     (plan.Mode === "active" ? "" : " · preview: nothing changed") + " · checked " + new Date(plan.CreatedUtc).toLocaleString();
                 page.querySelector("#DsWarning").textContent = plan.Warning || "";
                 var body = page.querySelector("#DsDecisions");
                 body.innerHTML = "";
                 plan.Decisions.forEach(function (d) {
                     var decision = d.Kind === "Move" ? "Move to " + d.MoveTo.ChannelName + " " + when(d.MoveTo.Start)
-                        : d.Kind === "Skip" ? "Skip (no other airing fits)" : "All already recording; nothing to do";
+                        : d.Kind === "Skip" ? "Skip (no other airing fits)"
+                        : d.Kind === "Duplicate" ? "Drop duplicate" + (d.IsRepeat ? " (repeat)" : "") + ": recorded " + when(d.Kept.Start) + " on " + d.Kept.ChannelName
+                        : "All already recording; nothing to do";
                     var tr = document.createElement("tr");
                     tr.style.borderTop = "1px solid rgba(128,128,128,.2)";
                     tr.innerHTML = '<td style="padding:.3em;white-space:nowrap;">' + esc(when(d.Start)) + '</td><td>' + esc(d.Title) + ' <span style="opacity:.6;">· ' +
                         esc(d.ChannelName) + '</span></td><td>' + esc(decision) + '</td><td style="opacity:.8;">' +
-                        esc(d.Competing.filter(function (c) { return c.Title !== d.Title; }).map(function (c) { return c.Title + " (" + c.ChannelName + ")"; }).join("; ")) + '</td>';
+                        esc(d.Kind === "Duplicate" ? "" : d.Competing.filter(function (c) { return c.Title !== d.Title; }).map(function (c) { return c.Title + " (" + c.ChannelName + ")"; }).join("; ")) + '</td>';
                     body.appendChild(tr);
                 });
                 if (!series.length) { series = plan.Series.slice(); renderSeries(); }
@@ -155,6 +169,8 @@
                     page.querySelector("#DsInterval").value = c.CheckIntervalMinutes || 30;
                     page.querySelector("#DsOneOff").checked = c.OneOffAboveSeries !== false;
                     page.querySelector("#DsMove").checked = c.MoveToOtherAiring !== false;
+                    page.querySelector("#DsOnce").checked = c.RecordEachEpisodeOnce !== false;
+                    page.querySelector("#DsKeep").value = c.KeepCopy || "earliest";
                     Dashboard.hideLoadingMsg();
                 });
                 load();
@@ -172,6 +188,8 @@
                     c.CheckIntervalMinutes = parseInt(page.querySelector("#DsInterval").value, 10) || 30;
                     c.OneOffAboveSeries = page.querySelector("#DsOneOff").checked;
                     c.MoveToOtherAiring = page.querySelector("#DsMove").checked;
+                    c.RecordEachEpisodeOnce = page.querySelector("#DsOnce").checked;
+                    c.KeepCopy = page.querySelector("#DsKeep").value;
                     c.SeriesPriority = series.map(function (s) { return s.Id; });
                     ApiClient.updatePluginConfiguration(pluginUniqueId, c).then(function (result) {
                         Dashboard.processPluginConfigurationUpdateResult(result);

@@ -17,6 +17,10 @@ XMLTV Guide Cleaner.
 - **Resolving,** lowest priority first: move the recording to another airing of the same episode (same guide
   programme id) that fits, otherwise skip it. Moves create a one-off recording of the other airing; skips cancel
   the episode (series episodes are also disarmed, working around Jellyfin 12 recording cancelled episodes anyway).
+- **One copy per episode** (on by default): when the same episode is scheduled more than once (e.g. a series set
+  to record all airings catches every repeat), only one copy is kept — one already recording, else one scheduled
+  by hand, else the earliest (or first-run) airing — and the rest are dropped. Only real episode/film guide ids
+  (TMS "EP…"/"MV…") count as the same episode; show-level ids ("SH…") never do, for dropping or for moves.
 - **Preview mode** (default) only shows the conflicts and what would be done.
 
 ## Settings (Dashboard → Plugins → JellyDVR Schedule)

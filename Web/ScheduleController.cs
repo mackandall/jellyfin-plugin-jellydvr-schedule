@@ -51,7 +51,9 @@ public sealed class ScheduleController : ControllerBase
             MoveTo = d.MoveTo is null ? null : new { d.MoveTo.ChannelName, d.MoveTo.Start },
             d.SlotStart,
             d.SlotEnd,
-            Competing = d.Competing.Select(c => new { c.Title, c.ChannelName, Start = c.Start + c.PadBefore, c.Rank, c.Locked })
+            Competing = d.Competing.Select(c => new { c.Title, c.ChannelName, Start = c.Start + c.PadBefore, c.Rank, c.Locked }),
+            Kept = d.KeptCopy is { } k ? new { k.ChannelName, Start = k.Start + k.PadBefore, k.IsRepeat } : null,
+            d.Recording.IsRepeat
         })
     };
 }

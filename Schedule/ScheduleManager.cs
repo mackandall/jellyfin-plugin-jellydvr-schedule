@@ -153,7 +153,6 @@ public sealed class ScheduleManager : BackgroundService
         if (capacity <= 0)
         {
             plan.Warning = "The tuner count is unlimited in Jellyfin; set \"Tuner inputs\" so conflicts can be found.";
-            return plan;
         }
 
         var buffers = LiveBufferTimerIds();
@@ -178,7 +177,9 @@ public sealed class ScheduleManager : BackgroundService
             return byShow.TryGetValue(r.ShowId, out var list) ? list.Where(a => a.ProgramId != r.ProgramId) : Enumerable.Empty<Airing>();
         }
 
-        plan.Decisions = ConflictPlanner.Plan(recordings, capacity, cfg.MoveToOtherAiring, Alternatives);
+        plan.Decisions = ConflictPlanner.Plan(
+            recordings, capacity, cfg.MoveToOtherAiring, Alternatives,
+            cfg.RecordEachEpisodeOnce, cfg.KeepCopy == PluginConfiguration.KeepFirstRun);
         return plan;
     }
 
@@ -205,7 +206,9 @@ public sealed class ScheduleManager : BackgroundService
             t.Id,
             t.SeriesTimerId,
             before,
-            after);
+            after,
+            program?.IsRepeat ?? false,
+            string.IsNullOrEmpty(t.SeriesTimerId));
     }
 
     // Future airings per show id (the same episode shown again), not already being recorded.
@@ -274,8 +277,17 @@ public sealed class ScheduleManager : BackgroundService
     private async Task ExecuteAsync(SchedulePlan plan, CancellationToken ct)
     {
         var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        // A recording that loses a conflict may move to an airing that was itself dropped as a
+        // duplicate: then that airing just keeps its existing recording (Jellyfin reuses timer ids
+        // per programme, so cancelling and re-creating it would clash).
+        var moveTargets = plan.Decisions.Where(d => d.MoveTo is not null).Select(d => d.MoveTo!.ProgramId).ToHashSet();
         foreach (var d in plan.Decisions.Where(d => d.Kind != DecisionKind.Unresolvable))
         {
+            if (d.Kind == DecisionKind.Duplicate && moveTargets.Contains(d.Recording.ProgramId))
+            {
+                continue;
+            }
+
             ct.ThrowIfCancellationRequested();
             var timer = timers.FirstOrDefault(t => t.Id == d.Recording.TimerId && t.Status == RecordingStatus.New);
             if (timer is null)
@@ -289,14 +301,22 @@ public sealed class ScheduleManager : BackgroundService
                 Title = d.Recording.Title,
                 Start = timer.StartDate,
                 Channel = d.Recording.ChannelName,
-                Action = d.Kind == DecisionKind.Move ? "moved" : "skipped",
+                Action = d.Kind switch
+                {
+                    DecisionKind.Move => "moved",
+                    DecisionKind.Duplicate => "dropped duplicate",
+                    _ => "skipped"
+                },
                 MovedTo = d.MoveTo is { } m ? $"{m.ChannelName} {m.Start:u}" : null,
                 ProgramId = d.Recording.ProgramId,
                 SeriesTimerId = d.Recording.SeriesTimerId
             };
             try
             {
-                if (d.MoveTo is { } airing)
+                var alreadyScheduled = d.MoveTo is { } target && timers.Any(t =>
+                    Guid.TryParse(t.ProgramId, out var p) && p == target.ProgramId
+                    && (t.Status == RecordingStatus.New || t.Status == RecordingStatus.InProgress));
+                if (d.MoveTo is { } airing && !alreadyScheduled)
                 {
                     var defaults = await LiveTv.GetNewTimerDefaults(airing.ProgramId.ToString("N"), ct).ConfigureAwait(false);
                     await LiveTv.CreateTimer(
