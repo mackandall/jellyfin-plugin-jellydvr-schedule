@@ -1,0 +1,16 @@
+{
+  "category": "Live TV",
+  "changelog": "",
+  "description": "SageTV-style recording priorities and conflict handling: ranks your series recordings, looks ahead for times when more recordings are scheduled than you have tuner inputs, and moves the lower-priority one to another airing of the same episode or skips it. Starts in preview mode.",
+  "guid": "7c1dd9fc-123a-477b-b646-e735ed726d58",
+  "name": "JellyDVR Schedule",
+  "overview": "",
+  "owner": "",
+  "targetAbi": "12.0.0.0",
+  "timestamp": "0001-01-01T00:00:00.0000000Z",
+  "version": "1.0.0.0",
+  "status": "Active",
+  "autoUpdate": false,
+  "imagePath": "icon.png",
+  "assemblies": []
+}

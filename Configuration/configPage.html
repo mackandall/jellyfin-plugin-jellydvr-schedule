@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>JellyDVR Schedule</title>
+</head>
+<body>
+<div id="DvrScheduleConfigPage"
+     data-role="page"
+     class="page type-interior pluginConfigurationPage"
+     data-require="emby-input,emby-button,emby-checkbox,emby-select">
+    <div data-role="content">
+        <div class="content-primary">
+
+            <div class="verticalSection">
+                <h2>Recording conflicts</h2>
+                <div id="DsSummary" class="fieldDescription">Loading…</div>
+                <div id="DsWarning" class="fieldDescription" style="color:#f59e0b;"></div>
+                <button is="emby-button" type="button" id="DsRun" class="raised emby-button" style="margin-top:.6em;">
+                    <span>Check now</span>
+                </button>
+                <table style="width:100%;border-collapse:collapse;font-size:.9em;margin-top:.8em;">
+                    <thead><tr style="text-align:left;opacity:.7;">
+                        <th style="padding:.3em;">When</th><th>Recording</th><th>Decision</th><th>Competing</th>
+                    </tr></thead>
+                    <tbody id="DsDecisions"></tbody>
+                </table>
+            </div>
+
+            <form id="DvrScheduleConfigForm">
+                <div class="verticalSection">
+                    <h2>Series priority</h2>
+                    <div class="fieldDescription" style="margin-bottom:.8em;">
+                        Highest first. When recordings clash, the lower one gives way: it moves to another airing of the
+                        same episode if one fits, otherwise it is skipped.
+                    </div>
+                    <div id="DsSeries"></div>
+                </div>
+
+                <div class="verticalSection">
+                    <h2>Settings</h2>
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="DsMode">Mode</label>
+                        <select is="emby-select" id="DsMode" class="emby-select-withcolor emby-select">
+                            <option value="preview">Preview: only show conflicts and what would be done</option>
+                            <option value="active">Active: move and skip recordings for real</option>
+                        </select>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="DsInputs">Tuner inputs that can record at once (0 = use Jellyfin's tuner count)</label>
+                        <input id="DsInputs" type="number" min="0" max="64" is="emby-input" />
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="DsDays">Look ahead (days)</label>
+                        <input id="DsDays" type="number" min="1" max="14" is="emby-input" />
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="DsInterval">Check every (minutes)</label>
+                        <input id="DsInterval" type="number" min="5" max="1440" is="emby-input" />
+                        <div class="fieldDescription">Also shortly after a recording is scheduled or cancelled.</div>
+                    </div>
+                    <div class="checkboxContainer">
+                        <label><input is="emby-checkbox" type="checkbox" id="DsOneOff" /><span>One-off recordings outrank every series</span></label>
+                    </div>
+                    <div class="checkboxContainer">
+                        <label><input is="emby-checkbox" type="checkbox" id="DsMove" /><span>Move to another airing of the same episode when one fits</span></label>
+                    </div>
+                </div>
+
+                <div>
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                        <span>Save</span>
+                    </button>
+                </div>
+            </form>
+
+            <div class="verticalSection">
+                <h2>Recent actions</h2>
+                <div id="DsRecent" class="fieldDescription" style="white-space:pre-line;">None yet.</div>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        (function () {
+            var pluginUniqueId = "7c1dd9fc-123a-477b-b646-e735ed726d58";
+            var page = document.querySelector("#DvrScheduleConfigPage");
+            var series = [];
+
+            function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+            function api(method, path) { return ApiClient.ajax({ type: method, url: ApiClient.getUrl(path), dataType: "json" }); }
+            function when(t) { return new Date(t).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+
+            function renderSeries() {
+                var host = page.querySelector("#DsSeries");
+                host.innerHTML = series.length ? "" : '<div class="fieldDescription">No series recordings.</div>';
+                series.forEach(function (s, i) {
+                    var row = document.createElement("div");
+                    row.style.cssText = "display:flex;gap:.5em;align-items:center;margin-bottom:.3em;";
+                    row.innerHTML = '<span style="width:2em;opacity:.7;">' + (i + 1) + '.</span>' +
+                        '<span style="flex:1;">' + esc(s.Name) + ' <span style="opacity:.6;">· ' + esc(s.Channel) + '</span></span>' +
+                        '<button is="emby-button" type="button" class="emby-button" data-a="up" title="Higher">▲</button>' +
+                        '<button is="emby-button" type="button" class="emby-button" data-a="down" title="Lower">▼</button>';
+                    row.querySelectorAll("[data-a]").forEach(function (b) {
+                        b.addEventListener("click", function () {
+                            var a = b.getAttribute("data-a");
+                            if (a === "up" && i > 0) { series.splice(i - 1, 0, series.splice(i, 1)[0]); }
+                            if (a === "down" && i < series.length - 1) { series.splice(i + 1, 0, series.splice(i, 1)[0]); }
+                            renderSeries();
+                        });
+                    });
+                    host.appendChild(row);
+                });
+            }
+
+            function render(s) {
+                var plan = s.Plan;
+                if (!plan) { page.querySelector("#DsSummary").textContent = "Not checked yet. Use Check now."; return; }
+                var todo = plan.Decisions.filter(function (d) { return d.Kind !== "Unresolvable"; }).length;
+                page.querySelector("#DsSummary").textContent = plan.Scheduled + " recording(s) in the next days · " + plan.Capacity +
+                    " input(s) · " + (todo ? todo + " conflict(s) to resolve" : "no conflicts") +
+                    (plan.Mode === "active" ? "" : " · preview: nothing changed") + " · checked " + new Date(plan.CreatedUtc).toLocaleString();
+                page.querySelector("#DsWarning").textContent = plan.Warning || "";
+                var body = page.querySelector("#DsDecisions");
+                body.innerHTML = "";
+                plan.Decisions.forEach(function (d) {
+                    var decision = d.Kind === "Move" ? "Move to " + d.MoveTo.ChannelName + " " + when(d.MoveTo.Start)
+                        : d.Kind === "Skip" ? "Skip (no other airing fits)" : "All already recording; nothing to do";
+                    var tr = document.createElement("tr");
+                    tr.style.borderTop = "1px solid rgba(128,128,128,.2)";
+                    tr.innerHTML = '<td style="padding:.3em;white-space:nowrap;">' + esc(when(d.Start)) + '</td><td>' + esc(d.Title) + ' <span style="opacity:.6;">· ' +
+                        esc(d.ChannelName) + '</span></td><td>' + esc(decision) + '</td><td style="opacity:.8;">' +
+                        esc(d.Competing.filter(function (c) { return c.Title !== d.Title; }).map(function (c) { return c.Title + " (" + c.ChannelName + ")"; }).join("; ")) + '</td>';
+                    body.appendChild(tr);
+                });
+                if (!series.length) { series = plan.Series.slice(); renderSeries(); }
+                page.querySelector("#DsRecent").textContent = (s.Recent || []).length
+                    ? s.Recent.slice(0, 30).map(function (r) {
+                        return new Date(r.Time).toLocaleString() + " · " + (r.Ok ? "" : "FAILED ") + r.Action + " " + r.Title + " (" + when(r.Start) + ", " + r.Channel + ")" +
+                            (r.MovedTo ? " → " + r.MovedTo : "") + (r.Error ? " · " + r.Error : "");
+                    }).join("\n")
+                    : "None yet.";
+            }
+
+            function load() { return api("GET", "JellyDvrSchedule/Status").then(render); }
+            function run() { return api("POST", "JellyDvrSchedule/Run").then(load); }
+
+            page.addEventListener("pageshow", function () {
+                Dashboard.showLoadingMsg();
+                series = [];
+                ApiClient.getPluginConfiguration(pluginUniqueId).then(function (c) {
+                    page.querySelector("#DsMode").value = c.Mode || "preview";
+                    page.querySelector("#DsInputs").value = c.TunerInputs || 0;
+                    page.querySelector("#DsDays").value = c.LookAheadDays || 7;
+                    page.querySelector("#DsInterval").value = c.CheckIntervalMinutes || 30;
+                    page.querySelector("#DsOneOff").checked = c.OneOffAboveSeries !== false;
+                    page.querySelector("#DsMove").checked = c.MoveToOtherAiring !== false;
+                    Dashboard.hideLoadingMsg();
+                });
+                load();
+            });
+
+            page.querySelector("#DsRun").addEventListener("click", run);
+
+            page.querySelector("#DvrScheduleConfigForm").addEventListener("submit", function (e) {
+                e.preventDefault();
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginUniqueId).then(function (c) {
+                    c.Mode = page.querySelector("#DsMode").value;
+                    c.TunerInputs = parseInt(page.querySelector("#DsInputs").value, 10) || 0;
+                    c.LookAheadDays = parseInt(page.querySelector("#DsDays").value, 10) || 7;
+                    c.CheckIntervalMinutes = parseInt(page.querySelector("#DsInterval").value, 10) || 30;
+                    c.OneOffAboveSeries = page.querySelector("#DsOneOff").checked;
+                    c.MoveToOtherAiring = page.querySelector("#DsMove").checked;
+                    c.SeriesPriority = series.map(function (s) { return s.Id; });
+                    ApiClient.updatePluginConfiguration(pluginUniqueId, c).then(function (result) {
+                        Dashboard.processPluginConfigurationUpdateResult(result);
+                        run();
+                    });
+                });
+                return false;
+            });
+        })();
+    </script>
+</div>
+</body>
+</html>
