@@ -73,6 +73,7 @@
   XMLHttpRequest.prototype.send = function () {
     var xhr = this;
     if (xhr.__jdvrItem) {
+      checkBeforeStart(xhr.__jdvrItem, xhr);
       xhr.addEventListener('loadend', function () {
         var failed = xhr.status === 0 || xhr.status >= 400;
         if (!failed) {
@@ -81,13 +82,40 @@
             failed = !!(body && body.ErrorCode);
           } catch (e) { /* not JSON */ }
         }
-        if (failed) {
+        if (failed && !xhr.__jdvrHandled) {
           check(xhr.__jdvrItem);
         }
       });
     }
     return xhrSend.apply(this, arguments);
   };
+
+  /*
+   * Right as the channel start is requested: if every input is already busy (and nothing has this
+   * channel open), say so at once instead of after BroadcastHub's ~30 s of nothing and Jellyfin's
+   * "Playback Error". The doomed request is cancelled; the error Jellyfin shows for that is closed.
+   */
+  function checkBeforeStart(itemId, xhr) {
+    var client = api();
+    if (!client) {
+      return;
+    }
+    client.ajax({ type: 'GET', url: client.getUrl('JellyDvrSchedule/Tuners', { channelId: itemId }), dataType: 'json' })
+      .then(function (status) {
+        if (!status || !status.IsChannel || !status.Full || xhr.readyState === 4) {
+          return; // tuners free, not a channel, or the start already finished
+        }
+        log('all ' + status.Capacity + ' inputs busy: not starting ' + (status.RequestedChannel || itemId));
+        xhr.__jdvrHandled = true;
+        lastCheck = { id: itemId, at: Date.now() };
+        show(status);
+        dismissPlaybackError(0);
+        try {
+          xhr.abort();
+        } catch (e) { /* already done */ }
+      })
+      .catch(function () { /* plugin missing or no Live TV access */ });
+  }
 
   var lastCheck = { id: null, at: 0 };
   function check(itemId) {
@@ -116,14 +144,14 @@
     var dialogs = document.querySelectorAll('.dialogContainer .dialog');
     for (var i = 0; i < dialogs.length; i++) {
       var d = dialogs[i];
-      if (d.id !== OVERLAY_ID && /Playback Error/i.test(d.textContent || '')) {
+      if (d.id !== OVERLAY_ID && !d.closest('#' + OVERLAY_ID) && /Playback Error/i.test(d.textContent || '')) {
         var button = d.querySelector('button');
         if (button) {
           button.click();
         }
       }
     }
-    if (attempt < 12) {
+    if (attempt < 20) {
       setTimeout(function () { dismissPlaybackError(attempt + 1); }, 400);
     }
   }
