@@ -29,6 +29,9 @@ public sealed class ScheduleManager : BackgroundService
 {
     private static readonly TimeSpan EventDelay = TimeSpan.FromSeconds(30);
 
+    /// <summary>How far ahead live viewers count as holding their inputs ("never interrupt viewers").</summary>
+    public static readonly TimeSpan ViewerHold = TimeSpan.FromMinutes(5);
+
     /// <summary>Rank of an airing chosen with "Record this instead": above every other recording.</summary>
     public const int PinnedRank = 1000000;
 
@@ -38,6 +41,7 @@ public sealed class ScheduleManager : BackgroundService
     private readonly IApplicationPaths _paths;
     private readonly IServiceProvider _serviceProvider;
     private readonly OutcomeStore _store;
+    private readonly LiveViewers _viewers;
     private readonly SemaphoreSlim _runLock = new(1, 1);
     private readonly ConcurrentQueue<ActionRecord> _recent = new();
     private Timer? _soon;
@@ -49,9 +53,11 @@ public sealed class ScheduleManager : BackgroundService
         IConfigurationManager config,
         IApplicationPaths paths,
         IServiceProvider serviceProvider,
-        OutcomeStore store)
+        OutcomeStore store,
+        LiveViewers viewers)
     {
         _store = store;
+        _viewers = viewers;
         _logger = logger;
         _libraryManager = libraryManager;
         _config = config;
@@ -209,13 +215,36 @@ public sealed class ScheduleManager : BackgroundService
         var seriesRank = plan.Series.Select((s, i) => (s.Id, Rank: 10000 - i)).ToDictionary(x => x.Id, x => x.Rank, StringComparer.Ordinal);
         var recordings = timers.Select(t => ToPlanned(t, cfg, seriesRank, pinned)).ToList();
         plan.Scheduled = recordings.Count;
+        var programIds = recordings.Select(r => r.ProgramId).ToList();
+
+        // "Never interrupt viewers": live TV holds its inputs for the next few minutes like a
+        // recording already in progress, so a recording about to start gives way instead.
+        if (cfg.LiveViewerPolicy == PluginConfiguration.ViewersFirst)
+        {
+            recordings.AddRange(_viewers.Current().GroupBy(v => v.ChannelId).Select(g => new PlannedRecording(
+                "viewer:" + g.Key.ToString("N"),
+                "Live TV: " + string.Join(", ", g.Select(v => v.Describe())),
+                g.Key,
+                g.First().ChannelName,
+                now,
+                now.Add(ViewerHold),
+                int.MaxValue,
+                true,
+                null,
+                Guid.Empty,
+                null,
+                null,
+                TimeSpan.Zero,
+                TimeSpan.Zero)));
+        }
 
         // An airing that is on the schedule again (recorded by hand, or restored) is no longer
         // skipped / moved.
-        _store.RemoveOutcomes(recordings.Select(r => r.ProgramId));
+        _store.RemoveOutcomes(programIds);
         var restorable = cfg.RestoreSkipped && cfg.Mode == PluginConfiguration.ModeActive
             ? _store.Outcomes
-                .Where(o => o.Kind == OutcomeStore.KindSkipped && o.Start > now.AddMinutes(2) && o.Start < horizon)
+                .Where(o => o.Kind == OutcomeStore.KindSkipped && o.Start < horizon
+                    && (o.Start > now.AddMinutes(2) || (cfg.StartLateWhenFree && o.End > now.AddMinutes(5))))
                 .Select(o => FromOutcome(o, cfg, seriesRank, pinned))
                 .OfType<PlannedRecording>()
                 .ToList()

@@ -22,9 +22,13 @@ public sealed class ScheduleController : ControllerBase
     private readonly ScheduleManager _manager;
     private readonly OutcomeStore _store;
     private readonly ILibraryManager _libraryManager;
+    private readonly LiveViewerGuard _guard;
+    private readonly LiveViewers _viewers;
 
-    public ScheduleController(ScheduleManager manager, OutcomeStore store, ILibraryManager libraryManager)
+    public ScheduleController(ScheduleManager manager, OutcomeStore store, ILibraryManager libraryManager, LiveViewerGuard guard, LiveViewers viewers)
     {
+        _guard = guard;
+        _viewers = viewers;
         _manager = manager;
         _store = store;
         _libraryManager = libraryManager;
@@ -37,7 +41,9 @@ public sealed class ScheduleController : ControllerBase
         Plan = Dto(_manager.LastPlan),
         Recent = _manager.RecentActions,
         Outcomes = _store.Outcomes.OrderBy(o => o.Start),
-        Pins = _store.Pins
+        Pins = _store.Pins,
+        Viewers = _viewers.Current().Select(v => v.Describe() + (string.IsNullOrEmpty(v.User) ? string.Empty : " (" + v.User + ")")),
+        ViewerActions = _guard.Recent.ToList()
     });
 
     [HttpPost("Run")]

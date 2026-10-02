@@ -95,6 +95,31 @@
                     </div>
                 </div>
 
+                <div class="verticalSection">
+                    <h2>Live TV and recordings</h2>
+                    <div class="fieldDescription" style="margin-bottom:.6em;">
+                        When a recording is about to start and people watching live TV hold every tuner input. Viewers on the
+                        recording's own channel share its input and are never interrupted.
+                    </div>
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="DsViewerPolicy">When live TV holds the tuners</label>
+                        <select is="emby-select" id="DsViewerPolicy" class="emby-select-withcolor emby-select">
+                            <option value="warn">Warn the viewer, then stop their live TV when the recording starts</option>
+                            <option value="record">Recordings always win (stop live TV without a warning)</option>
+                            <option value="viewers">Never interrupt viewers (move or skip the recording)</option>
+                        </select>
+                        <div class="fieldDescription">Who gives way: the channel with the fewest viewers, then the one tuned to most recently.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="DsWarnMinutes">Warn this many minutes before</label>
+                        <input id="DsWarnMinutes" type="number" min="0" max="30" is="emby-input" />
+                    </div>
+                    <div class="checkboxContainer">
+                        <label><input is="emby-checkbox" type="checkbox" id="DsStartLate" /><span>Start a skipped recording late (record the rest) when a tuner frees up while it's on</span></label>
+                    </div>
+                    <div id="DsViewers" class="fieldDescription" style="white-space:pre-line;"></div>
+                </div>
+
                 <div>
                     <button is="emby-button" type="submit" class="raised button-submit block emby-button">
                         <span>Save</span>
@@ -167,6 +192,8 @@
                 });
                 if (!series.length) { series = plan.Series.slice(); renderSeries(); }
                 renderOutcomes(s.Outcomes || [], s.Pins || []);
+                page.querySelector("#DsViewers").textContent = "Watching live TV now: " + ((s.Viewers || []).join("; ") || "nobody") +
+                    ((s.ViewerActions || []).length ? "\n" + s.ViewerActions.slice(0, 10).join("\n") : "");
                 page.querySelector("#DsRecent").textContent = (s.Recent || []).length
                     ? s.Recent.slice(0, 30).map(function (r) {
                         return new Date(r.Time).toLocaleString() + " · " + (r.Ok ? "" : "FAILED ") + r.Action + " " + r.Title + " (" + when(r.Start) + ", " + r.Channel + ")" +
@@ -236,6 +263,9 @@
                     page.querySelector("#DsMove").checked = c.MoveToOtherAiring !== false;
                     page.querySelector("#DsOnce").checked = c.RecordEachEpisodeOnce !== false;
                     page.querySelector("#DsRestore").checked = c.RestoreSkipped !== false;
+                    page.querySelector("#DsViewerPolicy").value = c.LiveViewerPolicy || "warn";
+                    page.querySelector("#DsWarnMinutes").value = c.WarnMinutes == null ? 2 : c.WarnMinutes;
+                    page.querySelector("#DsStartLate").checked = c.StartLateWhenFree !== false;
                     page.querySelector("#DsKeep").value = c.KeepCopy || "earliest";
                     Dashboard.hideLoadingMsg();
                 });
@@ -256,6 +286,10 @@
                     c.MoveToOtherAiring = page.querySelector("#DsMove").checked;
                     c.RecordEachEpisodeOnce = page.querySelector("#DsOnce").checked;
                     c.RestoreSkipped = page.querySelector("#DsRestore").checked;
+                    c.LiveViewerPolicy = page.querySelector("#DsViewerPolicy").value;
+                    var wm = parseInt(page.querySelector("#DsWarnMinutes").value, 10);
+                    c.WarnMinutes = isNaN(wm) ? 2 : wm;
+                    c.StartLateWhenFree = page.querySelector("#DsStartLate").checked;
                     c.KeepCopy = page.querySelector("#DsKeep").value;
                     c.SeriesPriority = series.map(function (s) { return s.Id; });
                     ApiClient.updatePluginConfiguration(pluginUniqueId, c).then(function (result) {

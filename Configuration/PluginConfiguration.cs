@@ -38,6 +38,24 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Put a skipped recording back on the schedule once it fits again (another recording was cancelled or moved).</summary>
     public bool RestoreSkipped { get; set; } = true;
 
+    public const string ViewersWarn = "warn";
+    public const string ViewersRecord = "record";
+    public const string ViewersFirst = "viewers";
+
+    /// <summary>
+    /// A recording is about to start and every tuner input is taken, some by people watching live TV:
+    /// "warn": tell the viewer whose input is needed, then stop their live TV when the recording starts;
+    /// "record": stop it without a warning; "viewers": never interrupt, move or skip the recording instead
+    /// (and start it late if the viewer stops while it's still on).
+    /// </summary>
+    public string LiveViewerPolicy { get; set; } = ViewersWarn;
+
+    /// <summary>How long before the recording starts the viewer is warned (minutes).</summary>
+    public int WarnMinutes { get; set; } = 2;
+
+    /// <summary>A skipped recording whose programme is already on starts late (records the rest) once an input is free.</summary>
+    public bool StartLateWhenFree { get; set; } = true;
+
     /// <summary>Series recordings (series timer ids), highest priority first.</summary>
     public string[] SeriesPriority { get; set; } = Array.Empty<string>();
 }
