@@ -42,6 +42,7 @@ public sealed class ScheduleManager : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly OutcomeStore _store;
     private readonly LiveViewers _viewers;
+    private readonly GuideMarks _marks;
     private readonly SemaphoreSlim _runLock = new(1, 1);
     private readonly ConcurrentQueue<ActionRecord> _recent = new();
     private Timer? _soon;
@@ -54,8 +55,10 @@ public sealed class ScheduleManager : BackgroundService
         IApplicationPaths paths,
         IServiceProvider serviceProvider,
         OutcomeStore store,
-        LiveViewers viewers)
+        LiveViewers viewers,
+        GuideMarks marks)
     {
+        _marks = marks;
         _store = store;
         _viewers = viewers;
         _logger = logger;
@@ -443,6 +446,7 @@ public sealed class ScheduleManager : BackgroundService
                     && (t.Status == RecordingStatus.New || t.Status == RecordingStatus.InProgress));
                 if (d.MoveTo is { } airing && !alreadyScheduled)
                 {
+                    await _marks.UnmarkAsync(airing.ProgramId, ct).ConfigureAwait(false);
                     var defaults = await LiveTv.GetNewTimerDefaults(airing.ProgramId.ToString("N"), ct).ConfigureAwait(false);
                     await LiveTv.CreateTimer(
                         new TimerInfoDto
@@ -550,6 +554,8 @@ public sealed class ScheduleManager : BackgroundService
     /// <summary>Schedules one airing (re-arming Jellyfin's cancelled timer for it, if it has one).</summary>
     public async Task CreateTimerAsync(Guid programId, int? prePaddingSeconds, int? postPaddingSeconds, CancellationToken ct)
     {
+        // Before Jellyfin copies the title into the timer (and the file name).
+        await _marks.UnmarkAsync(programId, ct).ConfigureAwait(false);
         var defaults = await LiveTv.GetNewTimerDefaults(programId.ToString("N"), ct).ConfigureAwait(false);
         await LiveTv.CreateTimer(
             new TimerInfoDto
