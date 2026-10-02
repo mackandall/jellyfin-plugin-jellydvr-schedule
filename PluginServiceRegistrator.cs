@@ -15,6 +15,7 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddSingleton<OutcomeStore>();
         serviceCollection.AddSingleton<GuideMarks>();
+        serviceCollection.AddSingleton<ActiveRecordings>();
         serviceCollection.AddSingleton<ScheduleManager>();
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<ScheduleManager>());
         serviceCollection.AddSingleton<LiveViewers>();

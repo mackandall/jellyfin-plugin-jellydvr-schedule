@@ -30,9 +30,11 @@ public sealed class TunersController : ControllerBase
     private readonly ILibraryManager _libraryManager;
     private readonly IApplicationPaths _paths;
     private readonly LiveViewers _viewers;
+    private readonly ActiveRecordings _active;
 
-    public TunersController(IServiceProvider serviceProvider, ILibraryManager libraryManager, IApplicationPaths paths, LiveViewers viewers)
+    public TunersController(IServiceProvider serviceProvider, ILibraryManager libraryManager, IApplicationPaths paths, LiveViewers viewers, ActiveRecordings active)
     {
+        _active = active;
         _serviceProvider = serviceProvider;
         _libraryManager = libraryManager;
         _paths = paths;
@@ -42,14 +44,12 @@ public sealed class TunersController : ControllerBase
     /// <param name="channelId">The channel someone tried to watch (optional).</param>
     [HttpGet("Tuners")]
     [Authorize(Policy = Policies.LiveTvAccess)]
-    public async Task<IActionResult> Tuners([FromQuery] Guid? channelId, CancellationToken cancellationToken)
+    public IActionResult Tuners([FromQuery] Guid? channelId)
     {
+        // Answered while a client waits to start a channel: no ILiveTvManager.GetTimers (seconds).
         var capacity = Plugin.Instance?.Configuration.TunerInputs ?? 0;
-        var liveTv = _serviceProvider.GetRequiredService<ILiveTvManager>();
         var buffers = LiveBufferTimerIds();
-        var timers = (await liveTv.GetTimers(new TimerQuery(), cancellationToken).ConfigureAwait(false)).Items
-            .Where(t => t.Status == RecordingStatus.InProgress)
-            .ToList();
+        var timers = _active.Current();
 
         var busy = new Dictionary<Guid, Busy>();
         Busy For(Guid id)
@@ -66,8 +66,8 @@ public sealed class TunersController : ControllerBase
         foreach (var t in timers)
         {
             var b = For(t.ChannelId);
-            var ends = t.EndDate.AddSeconds(Math.Max(0, t.PostPaddingSeconds));
-            if (buffers.Contains(t.Id))
+            var ends = t.EndUtc;
+            if (buffers.Contains(t.TimerId))
             {
                 b.Buffering = true; // JellyDVR Live buffer: shares a viewer's stream
             }
