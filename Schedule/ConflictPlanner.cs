@@ -21,7 +21,8 @@ public sealed record PlannedRecording(
     TimeSpan PadBefore,
     TimeSpan PadAfter,
     bool IsRepeat = false,
-    bool OneOff = false);
+    bool OneOff = false,
+    bool Pinned = false);
 
 /// <summary>An alternative airing of the same episode that a recording could move to.</summary>
 public sealed record Airing(Guid ProgramId, Guid ChannelId, string ChannelName, DateTime Start, DateTime End);
@@ -38,7 +39,10 @@ public enum DecisionKind
     Unresolvable,
 
     /// <summary>The same episode is also scheduled at another time: this copy is dropped.</summary>
-    Duplicate
+    Duplicate,
+
+    /// <summary>An airing skipped earlier now fits again: put it back on the schedule.</summary>
+    Restore
 }
 
 public sealed record Decision(
@@ -73,7 +77,8 @@ public static class ConflictPlanner
         bool moveToOtherAiring,
         Func<PlannedRecording, IEnumerable<Airing>> alternatives,
         bool recordEachEpisodeOnce = false,
-        bool preferFirstRun = false)
+        bool preferFirstRun = false,
+        IReadOnlyList<PlannedRecording>? restorable = null)
     {
         var decisions = new List<Decision>();
         var active = recordings.ToList();
@@ -87,6 +92,7 @@ public static class ConflictPlanner
             {
                 var kept = group
                     .OrderByDescending(r => r.Locked)
+                    .ThenByDescending(r => r.Pinned)
                     .ThenByDescending(r => r.OneOff)
                     .ThenBy(r => preferFirstRun && r.IsRepeat)
                     .ThenBy(r => r.Start)
@@ -103,6 +109,7 @@ public static class ConflictPlanner
         {
             return decisions;
         }
+
 
         var usedAirings = new HashSet<Guid>(active.Select(r => r.ProgramId));
         for (var guard = 0; guard < 200; guard++)
@@ -129,8 +136,9 @@ public static class ConflictPlanner
             active.Remove(loser);
             Airing? moveTo = null;
             // Only a real episode id says two airings are the same episode, and never move to
-            // an episode that is already being recorded at another time.
-            if (moveToOtherAiring && IsEpisodeId(loser.ShowId)
+            // an episode that is already being recorded at another time. An airing someone chose
+            // by hand ("Record this instead") is never swapped for a different one.
+            if (moveToOtherAiring && !loser.Pinned && IsEpisodeId(loser.ShowId)
                 && !active.Any(r => string.Equals(r.ShowId, loser.ShowId, StringComparison.OrdinalIgnoreCase)))
             {
                 foreach (var airing in alternatives(loser).Where(a => !usedAirings.Contains(a.ProgramId)).OrderBy(a => a.Start))
@@ -158,6 +166,23 @@ public static class ConflictPlanner
             }
 
             decisions.Add(new Decision(moveTo is null ? DecisionKind.Skip : DecisionKind.Move, loser, moveTo, slot.Start, slot.End, slot.Members));
+        }
+
+        // Airings skipped earlier go back on, highest priority first, wherever they fit now
+        // without overloading anything (an episode already scheduled at another time stays off).
+        foreach (var r in (restorable ?? Array.Empty<PlannedRecording>()).OrderByDescending(r => r.Rank).ThenBy(r => r.Start))
+        {
+            if (IsEpisodeId(r.ShowId) && active.Any(a => string.Equals(a.ShowId, r.ShowId, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            var trial = active.Append(r).ToList();
+            if (FirstOverload(trial, capacity, r.Start, r.End) is null)
+            {
+                active.Add(r);
+                decisions.Add(new Decision(DecisionKind.Restore, r, null, r.Start, r.End, Array.Empty<PlannedRecording>()));
+            }
         }
 
         return decisions;

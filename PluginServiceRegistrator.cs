@@ -13,6 +13,7 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
 {
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
+        serviceCollection.AddSingleton<OutcomeStore>();
         serviceCollection.AddSingleton<ScheduleManager>();
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<ScheduleManager>());
 

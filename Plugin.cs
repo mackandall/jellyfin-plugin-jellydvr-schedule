@@ -10,11 +10,10 @@ using MediaBrowser.Model.Serialization;
 namespace Jellyfin.Plugin.DvrSchedule;
 
 /// <summary>
-/// JellyDVR Schedule: a SageTV-style live TV buffer. While someone watches a channel, the programme
-/// on it is recorded from the moment they tuned in (a normal Jellyfin recording sharing their
-/// tuner stream), so they can rewind past tune-in, carry on from another device, skip
-/// commercials, or keep it. Buffers nobody keeps are deleted after a while. Pausing itself
-/// stays on the live stream. The dashboard icon comes from meta.json's <c>imagePath</c>.
+/// JellyDVR Schedule: SageTV-style recording priorities. When more recordings are scheduled than
+/// there are tuner inputs, the lower-priority one moves to another airing of the same episode or
+/// is skipped; "Record this instead" overrides a decision, and skipped airings come back when
+/// there's room. The dashboard icon comes from meta.json's <c>imagePath</c>.
 /// </summary>
 public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {

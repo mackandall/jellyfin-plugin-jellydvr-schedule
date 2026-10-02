@@ -35,6 +35,9 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Which copy to keep: "earliest" airing, or "first-run" (a non-repeat airing if there is one).</summary>
     public string KeepCopy { get; set; } = KeepEarliest;
 
+    /// <summary>Put a skipped recording back on the schedule once it fits again (another recording was cancelled or moved).</summary>
+    public bool RestoreSkipped { get; set; } = true;
+
     /// <summary>Series recordings (series timer ids), highest priority first.</summary>
     public string[] SeriesPriority { get; set; } = Array.Empty<string>();
 }

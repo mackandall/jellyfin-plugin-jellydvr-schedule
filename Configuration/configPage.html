@@ -27,6 +27,20 @@
                 </table>
             </div>
 
+            <div class="verticalSection">
+                <h2>Not being recorded</h2>
+                <div class="fieldDescription" style="margin-bottom:.5em;">
+                    Airings taken off the schedule because of a conflict or a duplicate. <b>Record this instead</b> puts one back
+                    above every other recording; whatever it clashes with gives way.
+                </div>
+                <div id="DsOutcomes" class="fieldDescription">None.</div>
+            </div>
+
+            <div class="verticalSection" id="DsPinsSection" style="display:none;">
+                <h2>Chosen with "Record this instead"</h2>
+                <div id="DsPins"></div>
+            </div>
+
             <form id="DvrScheduleConfigForm">
                 <div class="verticalSection">
                     <h2>Series priority</h2>
@@ -64,6 +78,9 @@
                     </div>
                     <div class="checkboxContainer">
                         <label><input is="emby-checkbox" type="checkbox" id="DsMove" /><span>Move to another airing of the same episode when one fits</span></label>
+                    </div>
+                    <div class="checkboxContainer">
+                        <label><input is="emby-checkbox" type="checkbox" id="DsRestore" /><span>Put a skipped recording back when it fits again (another recording was cancelled or moved)</span></label>
                     </div>
                     <div class="checkboxContainer">
                         <label><input is="emby-checkbox" type="checkbox" id="DsOnce" /><span>Record each episode once (drop extra airings of an episode that is already scheduled)</span></label>
@@ -139,6 +156,7 @@
                     var decision = d.Kind === "Move" ? "Move to " + d.MoveTo.ChannelName + " " + when(d.MoveTo.Start)
                         : d.Kind === "Skip" ? "Skip (no other airing fits)"
                         : d.Kind === "Duplicate" ? "Drop duplicate" + (d.IsRepeat ? " (repeat)" : "") + ": recorded " + when(d.Kept.Start) + " on " + d.Kept.ChannelName
+                        : d.Kind === "Restore" ? "Put back on the schedule (fits again)"
                         : "All already recording; nothing to do";
                     var tr = document.createElement("tr");
                     tr.style.borderTop = "1px solid rgba(128,128,128,.2)";
@@ -148,12 +166,59 @@
                     body.appendChild(tr);
                 });
                 if (!series.length) { series = plan.Series.slice(); renderSeries(); }
+                renderOutcomes(s.Outcomes || [], s.Pins || []);
                 page.querySelector("#DsRecent").textContent = (s.Recent || []).length
                     ? s.Recent.slice(0, 30).map(function (r) {
                         return new Date(r.Time).toLocaleString() + " · " + (r.Ok ? "" : "FAILED ") + r.Action + " " + r.Title + " (" + when(r.Start) + ", " + r.Channel + ")" +
                             (r.MovedTo ? " → " + r.MovedTo : "") + (r.Error ? " · " + r.Error : "");
                     }).join("\n")
                     : "None yet.";
+            }
+
+            function button(label, onClick) {
+                var b = document.createElement("button");
+                b.setAttribute("is", "emby-button");
+                b.type = "button";
+                b.className = "raised emby-button";
+                b.style.cssText = "margin:0 0 0 .6em;padding:.2em .8em;font-size:.85em;";
+                b.textContent = label;
+                b.addEventListener("click", onClick);
+                return b;
+            }
+
+            function recordInstead(programId) {
+                Dashboard.showLoadingMsg();
+                api("POST", "JellyDvrSchedule/RecordInstead/" + programId).then(function (r) {
+                    Dashboard.hideLoadingMsg();
+                    Dashboard.alert(r.Message);
+                    load();
+                }, function () { Dashboard.hideLoadingMsg(); Dashboard.alert("Could not schedule it."); });
+            }
+
+            function renderOutcomes(outcomes, pins) {
+                var host = page.querySelector("#DsOutcomes");
+                host.innerHTML = outcomes.length ? "" : "None.";
+                var label = { skipped: "Skipped", moved: "Moved", duplicate: "Duplicate" };
+                outcomes.forEach(function (o) {
+                    var row = document.createElement("div");
+                    row.style.cssText = "display:flex;align-items:center;gap:.4em;padding:.25em 0;border-top:1px solid rgba(128,128,128,.2);";
+                    row.innerHTML = '<span style="flex:1;"><b style="color:' + (o.Kind === "skipped" ? "#f59e0b" : "inherit") + ';">' + esc(label[o.Kind] || o.Kind) + '</b> · ' +
+                        esc(when(o.Start)) + ' · ' + esc(o.Title) + ' <span style="opacity:.6;">· ' + esc(o.ChannelName) + '</span><br><span style="opacity:.7;">' + esc(o.Detail) + '</span></span>';
+                    row.appendChild(button("Record this instead", function () { recordInstead(o.ProgramId); }));
+                    host.appendChild(row);
+                });
+                var pinHost = page.querySelector("#DsPins");
+                page.querySelector("#DsPinsSection").style.display = pins.length ? "" : "none";
+                pinHost.innerHTML = "";
+                pins.forEach(function (p) {
+                    var row = document.createElement("div");
+                    row.style.cssText = "display:flex;align-items:center;padding:.2em 0;";
+                    row.innerHTML = '<span style="flex:1;">' + esc(p.Title) + ' <span style="opacity:.6;">· until ' + esc(when(p.End)) + '</span></span>';
+                    row.appendChild(button("Remove", function () {
+                        api("DELETE", "JellyDvrSchedule/RecordInstead/" + p.ProgramId).then(load);
+                    }));
+                    pinHost.appendChild(row);
+                });
             }
 
             function load() { return api("GET", "JellyDvrSchedule/Status").then(render); }
@@ -170,6 +235,7 @@
                     page.querySelector("#DsOneOff").checked = c.OneOffAboveSeries !== false;
                     page.querySelector("#DsMove").checked = c.MoveToOtherAiring !== false;
                     page.querySelector("#DsOnce").checked = c.RecordEachEpisodeOnce !== false;
+                    page.querySelector("#DsRestore").checked = c.RestoreSkipped !== false;
                     page.querySelector("#DsKeep").value = c.KeepCopy || "earliest";
                     Dashboard.hideLoadingMsg();
                 });
@@ -189,6 +255,7 @@
                     c.OneOffAboveSeries = page.querySelector("#DsOneOff").checked;
                     c.MoveToOtherAiring = page.querySelector("#DsMove").checked;
                     c.RecordEachEpisodeOnce = page.querySelector("#DsOnce").checked;
+                    c.RestoreSkipped = page.querySelector("#DsRestore").checked;
                     c.KeepCopy = page.querySelector("#DsKeep").value;
                     c.SeriesPriority = series.map(function (s) { return s.Id; });
                     ApiClient.updatePluginConfiguration(pluginUniqueId, c).then(function (result) {
