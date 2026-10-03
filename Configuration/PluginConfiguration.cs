@@ -56,6 +56,47 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>A skipped recording whose programme is already on starts late (records the rest) once an input is free.</summary>
     public bool StartLateWhenFree { get; set; } = true;
 
-    /// <summary>Series recordings (series timer ids), highest priority first.</summary>
+    /// <summary>Title/keyword recording rules, independent of guide ids.</summary>
+    public FavouriteRule[] Favourites { get; set; } = Array.Empty<FavouriteRule>();
+
+    /// <summary>
+    /// Series recordings (series timer ids) and favourites ("fav:" + rule id), highest priority first.
+    /// </summary>
     public string[] SeriesPriority { get; set; } = Array.Empty<string>();
+}
+
+/// <summary>
+/// A favourite: records airings whose title matches, whatever id the guide gives the show, so a
+/// guide switch or renumbering can't silently break it (a Jellyfin series recording is tied to the
+/// guide's series id).
+/// </summary>
+public class FavouriteRule
+{
+    public const string MatchTitle = "title";
+    public const string MatchKeyword = "keyword";
+    public const string TypeAny = "any";
+    public const string TypeSeries = "series";
+    public const string TypeMovies = "movies";
+
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    /// <summary>The show's title (exact, ignoring case, punctuation, "The" and a trailing year) or a keyword.</summary>
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>"title": the whole title matches; "keyword": the words appear in the title.</summary>
+    public string Match { get; set; } = MatchTitle;
+
+    /// <summary>Channel numbers or names, comma separated; empty = any channel.</summary>
+    public string Channels { get; set; } = string.Empty;
+
+    /// <summary>Only airings not marked as repeats.</summary>
+    public bool NewOnly { get; set; }
+
+    /// <summary>"any", "series" (episodes) or "movies".</summary>
+    public string Type { get; set; } = TypeAny;
+
+    /// <summary>Skip episodes Episode History marks as already in the library.</summary>
+    public bool SkipInLibrary { get; set; } = true;
+
+    public bool Enabled { get; set; } = true;
 }

@@ -59,6 +59,72 @@ public sealed class GuideMarks
         return true;
     }
 
+    /// <summary>
+    /// Whether Episode History marks this episode title as "recorded and still in the library" (its
+    /// in-library symbol among the leading marks). False without that plugin or with marks off.
+    /// </summary>
+    public bool IsMarkedInLibrary(string? episodeTitle)
+    {
+        if (string.IsNullOrEmpty(episodeTitle))
+        {
+            return false;
+        }
+
+        var (symbols, inLibrary) = Cached();
+        var rest = episodeTitle;
+        var prefix = new System.Text.StringBuilder();
+        bool any;
+        do
+        {
+            any = false;
+            foreach (var s in symbols)
+            {
+                if (rest.StartsWith(s, StringComparison.Ordinal))
+                {
+                    prefix.Append(s);
+                    rest = rest[s.Length..];
+                    any = true;
+                }
+            }
+        }
+        while (any && rest.Length > 0);
+
+        return prefix.ToString().Contains(inLibrary, StringComparison.Ordinal);
+    }
+
+    /// <summary>An episode title without Episode History's marks (null if only a mark label was there).</summary>
+    public string? StripMarks(string? episodeTitle) =>
+        string.IsNullOrEmpty(episodeTitle) ? episodeTitle : Strip(episodeTitle, Cached().Symbols);
+
+    // The settings file is read at most once a minute (a favourites run checks thousands of airings).
+    private (List<string> Symbols, string InLibrary)? _cache;
+    private DateTime _cacheAt = DateTime.MinValue;
+
+    private (List<string> Symbols, string InLibrary) Cached()
+    {
+        if (_cache is not { } c || DateTime.UtcNow - _cacheAt > TimeSpan.FromMinutes(1))
+        {
+            c = (Symbols(), ConfigValue("InLibrarySymbol") ?? "●");
+            _cache = c;
+            _cacheAt = DateTime.UtcNow;
+        }
+
+        return c;
+    }
+
+    private string? ConfigValue(string name)
+    {
+        try
+        {
+            var file = Path.Combine(_paths.PluginConfigurationsPath, "Jellyfin.Plugin.EpisodeHistory.xml");
+            return File.Exists(file) && XDocument.Load(file).Root?.Element(name)?.Value is { Length: > 0 } v ? v.Trim() : null;
+        }
+        catch (Exception ex) when (ex is IOException or System.Xml.XmlException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>The title without leading mark symbols; null if only a mark label was left.</summary>
     public static string? Strip(string title, IReadOnlyList<string> symbols)
     {

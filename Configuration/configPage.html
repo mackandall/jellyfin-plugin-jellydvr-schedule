@@ -43,6 +43,21 @@
 
             <form id="DvrScheduleConfigForm">
                 <div class="verticalSection">
+                    <h2>Favourites</h2>
+                    <div class="fieldDescription" style="margin-bottom:.6em;">
+                        Record by <b>title</b>, whatever id the guide gives the show, so a guide change can't silently break it
+                        (a Jellyfin series recording is tied to the guide's series id). Each episode is recorded once, at its
+                        earliest matching airing. <b>Exact title</b> ignores case, punctuation, a leading "The" and a year in
+                        brackets; <b>Keyword</b> matches those words anywhere in the title. Save to apply; favourites are
+                        checked every few minutes and after each guide refresh.
+                    </div>
+                    <div id="DsFavourites"></div>
+                    <button is="emby-button" type="button" id="DsAddFavourite" class="raised emby-button" style="margin-top:.4em;">
+                        <span>+ Add favourite</span>
+                    </button>
+                </div>
+
+                <div class="verticalSection">
                     <h2>Series priority</h2>
                     <div class="fieldDescription" style="margin-bottom:.8em;">
                         Highest first. When recordings clash, the lower one gives way: it moves to another airing of the
@@ -139,6 +154,66 @@
             var pluginUniqueId = "7c1dd9fc-123a-477b-b646-e735ed726d58";
             var page = document.querySelector("#DvrScheduleConfigPage");
             var series = [];
+            var favourites = [];
+            var FIELD = "background:rgba(255,255,255,.08);color:inherit;border:1px solid rgba(255,255,255,.2);border-radius:.25em;padding:.4em .5em;font-size:.95em;";
+
+            function newId() { return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, function (c) { return (c ^ Math.random() * 16 >> c / 4).toString(16); }).replace(/-/g, ""); }
+
+            function favRow(f, i) {
+                var row = document.createElement("div");
+                row.style.cssText = "border-top:1px solid rgba(128,128,128,.25);padding:.6em 0;";
+                row.innerHTML =
+                    '<div style="display:flex;flex-wrap:wrap;gap:.5em;align-items:center;">' +
+                    '<input data-f="Title" placeholder="Title or keyword" style="' + FIELD + 'flex:2;min-width:12em;" />' +
+                    '<select data-f="Match" style="' + FIELD + '"><option value="title">Exact title</option><option value="keyword">Keyword</option></select>' +
+                    '<select data-f="Type" style="' + FIELD + '"><option value="any">Shows and movies</option><option value="series">Shows only</option><option value="movies">Movies only</option></select>' +
+                    '<input data-f="Channels" placeholder="Channels (any)" title="Channel numbers or names, comma separated; empty = any channel" style="' + FIELD + 'flex:1;min-width:8em;" />' +
+                    '</div>' +
+                    '<div style="display:flex;flex-wrap:wrap;gap:1.2em;align-items:center;margin-top:.4em;font-size:.95em;">' +
+                    '<label><input type="checkbox" data-f="NewOnly" /> New episodes only</label>' +
+                    '<label><input type="checkbox" data-f="SkipInLibrary" /> Skip episodes already in the library</label>' +
+                    '<label><input type="checkbox" data-f="Enabled" /> Enabled</label>' +
+                    '<span style="flex:1;"></span>' +
+                    '<button is="emby-button" type="button" class="raised emby-button" data-a="preview" style="padding:.2em .8em;">Preview</button>' +
+                    '<button is="emby-button" type="button" class="emby-button" data-a="remove" style="padding:.2em .8em;">Remove</button>' +
+                    '</div>' +
+                    '<div data-preview class="fieldDescription" style="margin-top:.4em;"></div>';
+                row.querySelectorAll("[data-f]").forEach(function (el) {
+                    var key = el.getAttribute("data-f");
+                    if (el.type === "checkbox") { el.checked = !!f[key]; } else { el.value = f[key] || el.value; }
+                    el.addEventListener(el.type === "checkbox" || el.tagName === "SELECT" ? "change" : "input", function () {
+                        f[key] = el.type === "checkbox" ? el.checked : el.value;
+                    });
+                });
+                row.querySelector('[data-a="remove"]').addEventListener("click", function () {
+                    favourites.splice(i, 1);
+                    renderFavourites();
+                });
+                row.querySelector('[data-a="preview"]').addEventListener("click", function () {
+                    var out = row.querySelector("[data-preview]");
+                    if (!f.Title) { out.textContent = "Enter a title first."; return; }
+                    out.textContent = "Looking…";
+                    ApiClient.ajax({ type: "POST", url: ApiClient.getUrl("JellyDvrSchedule/Favourites/Preview"), data: JSON.stringify([f]), contentType: "application/json", dataType: "json" })
+                        .then(function (hits) {
+                            if (!hits.length) { out.textContent = "Nothing in the guide matches right now (it will be picked up when it appears)."; return; }
+                            out.innerHTML = "";
+                            hits.slice(0, 25).forEach(function (h) {
+                                var line = document.createElement("div");
+                                var colour = h.Status === "will record" ? "#15803d" : h.Status === "scheduled" ? "#00a4dc" : "inherit";
+                                line.innerHTML = esc(when(h.Start)) + " · " + esc(h.Title) + ' <span style="opacity:.6;">· ' + esc(h.Channel) + '</span> — <b style="color:' + colour + ';">' + esc(h.Status) + "</b>";
+                                out.appendChild(line);
+                            });
+                            if (hits.length > 25) { out.appendChild(document.createTextNode("… and " + (hits.length - 25) + " more")); }
+                        }, function () { out.textContent = "Preview failed."; });
+                });
+                return row;
+            }
+
+            function renderFavourites() {
+                var host = page.querySelector("#DsFavourites");
+                host.innerHTML = favourites.length ? "" : '<div class="fieldDescription">No favourites yet.</div>';
+                favourites.forEach(function (f, i) { host.appendChild(favRow(f, i)); });
+            }
 
             function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
             function api(method, path) { return ApiClient.ajax({ type: method, url: ApiClient.getUrl(path), dataType: "json" }); }
@@ -263,6 +338,8 @@
                     page.querySelector("#DsMove").checked = c.MoveToOtherAiring !== false;
                     page.querySelector("#DsOnce").checked = c.RecordEachEpisodeOnce !== false;
                     page.querySelector("#DsRestore").checked = c.RestoreSkipped !== false;
+                    favourites = (c.Favourites || []).map(function (f) { return Object.assign({}, f); });
+                    renderFavourites();
                     page.querySelector("#DsViewerPolicy").value = c.LiveViewerPolicy || "warn";
                     page.querySelector("#DsWarnMinutes").value = c.WarnMinutes == null ? 2 : c.WarnMinutes;
                     page.querySelector("#DsStartLate").checked = c.StartLateWhenFree !== false;
@@ -273,6 +350,13 @@
             });
 
             page.querySelector("#DsRun").addEventListener("click", run);
+
+            page.querySelector("#DsAddFavourite").addEventListener("click", function () {
+                favourites.push({ Id: newId(), Title: "", Match: "title", Channels: "", NewOnly: false, Type: "any", SkipInLibrary: true, Enabled: true });
+                renderFavourites();
+                var inputs = page.querySelectorAll('#DsFavourites [data-f="Title"]');
+                if (inputs.length) { inputs[inputs.length - 1].focus(); }
+            });
 
             page.querySelector("#DvrScheduleConfigForm").addEventListener("submit", function (e) {
                 e.preventDefault();
@@ -286,6 +370,10 @@
                     c.MoveToOtherAiring = page.querySelector("#DsMove").checked;
                     c.RecordEachEpisodeOnce = page.querySelector("#DsOnce").checked;
                     c.RestoreSkipped = page.querySelector("#DsRestore").checked;
+                    c.Favourites = favourites.filter(function (f) { return (f.Title || "").trim(); }).map(function (f) {
+                        return { Id: f.Id || newId(), Title: f.Title.trim(), Match: f.Match || "title", Channels: f.Channels || "", NewOnly: !!f.NewOnly,
+                            Type: f.Type || "any", SkipInLibrary: f.SkipInLibrary !== false, Enabled: f.Enabled !== false };
+                    });
                     c.LiveViewerPolicy = page.querySelector("#DsViewerPolicy").value;
                     var wm = parseInt(page.querySelector("#DsWarnMinutes").value, 10);
                     c.WarnMinutes = isNaN(wm) ? 2 : wm;
@@ -294,6 +382,7 @@
                     c.SeriesPriority = series.map(function (s) { return s.Id; });
                     ApiClient.updatePluginConfiguration(pluginUniqueId, c).then(function (result) {
                         Dashboard.processPluginConfigurationUpdateResult(result);
+                        series = [];
                         run();
                     });
                 });

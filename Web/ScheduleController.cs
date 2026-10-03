@@ -42,6 +42,7 @@ public sealed class ScheduleController : ControllerBase
         Recent = _manager.RecentActions,
         Outcomes = _store.Outcomes.OrderBy(o => o.Start),
         Pins = _store.Pins,
+        Favourites = _manager.LastFavourites.Select(FavouriteDto),
         Viewers = _viewers.Current().Select(v => v.Describe() + (string.IsNullOrEmpty(v.User) ? string.Empty : " (" + v.User + ")")),
         ViewerActions = _guard.Recent.ToList()
     });
@@ -53,6 +54,26 @@ public sealed class ScheduleController : ControllerBase
         var plan = await _manager.RunAsync("manual", cancellationToken).ConfigureAwait(false);
         return Ok(Dto(plan));
     }
+
+    /// <summary>
+    /// What favourite rules (the ones posted, e.g. while editing; saved ones if none) would match now:
+    /// upcoming airings and what would happen to each. Schedules nothing.
+    /// </summary>
+    [HttpPost("Favourites/Preview")]
+    [Authorize(Policy = Policies.RequiresElevation)]
+    public async Task<IActionResult> PreviewFavourites([FromBody] Configuration.FavouriteRule[]? rules, CancellationToken cancellationToken)
+    {
+        var use = rules is { Length: > 0 } ? rules : Plugin.Instance?.Configuration.Favourites ?? Array.Empty<Configuration.FavouriteRule>();
+        foreach (var r in use)
+        {
+            r.Enabled = true; // previewing a rule shows its matches even while it's switched off
+        }
+
+        var hits = await _manager.PreviewFavouritesAsync(use, cancellationToken).ConfigureAwait(false);
+        return Ok(hits.Select(FavouriteDto));
+    }
+
+    private static object FavouriteDto(FavouriteHit h) => new { h.ProgramId, h.RuleId, h.RuleTitle, h.Title, h.Channel, h.Start, h.End, h.Status };
 
     /// <summary>What the scheduler did with one guide airing: skipped / moved / dropped, and whether it is pinned.</summary>
     [HttpGet("Program/{programId}")]

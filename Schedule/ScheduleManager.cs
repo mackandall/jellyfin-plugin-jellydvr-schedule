@@ -13,6 +13,7 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Model.LiveTv;
+using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -43,6 +44,9 @@ public sealed class ScheduleManager : BackgroundService
     private readonly OutcomeStore _store;
     private readonly LiveViewers _viewers;
     private readonly GuideMarks _marks;
+    private readonly Favourites _favourites;
+    private readonly ITaskManager _taskManager;
+    private Timer? _afterGuide;
     private readonly SemaphoreSlim _runLock = new(1, 1);
     private readonly ConcurrentQueue<ActionRecord> _recent = new();
     private Timer? _soon;
@@ -56,9 +60,13 @@ public sealed class ScheduleManager : BackgroundService
         IServiceProvider serviceProvider,
         OutcomeStore store,
         LiveViewers viewers,
-        GuideMarks marks)
+        GuideMarks marks,
+        Favourites favourites,
+        ITaskManager taskManager)
     {
         _marks = marks;
+        _favourites = favourites;
+        _taskManager = taskManager;
         _store = store;
         _viewers = viewers;
         _logger = logger;
@@ -76,12 +84,19 @@ public sealed class ScheduleManager : BackgroundService
 
     public IReadOnlyList<ActionRecord> RecentActions => _recent.Reverse().ToList();
 
+    /// <summary>What the favourites matched on the last run.</summary>
+    public IReadOnlyList<FavouriteHit> LastFavourites { get; private set; } = Array.Empty<FavouriteHit>();
+
     // ---- scheduling ------------------------------------------------------------------------
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _stopping = stoppingToken;
         _soon = new Timer(_ => _ = RunSafeAsync("recordings changed"), null, Timeout.Infinite, Timeout.Infinite);
+        // After "Refresh Guide": new airings for the favourites. Waits a few minutes so Episode
+        // History has re-marked the guide (its in-library marks decide what favourites skip).
+        _afterGuide = new Timer(_ => _ = RunSafeAsync("guide refreshed"), null, Timeout.Infinite, Timeout.Infinite);
+        _taskManager.TaskCompleted += OnTaskCompleted;
         LiveTv.TimerCreated += OnScheduleChanged;
         LiveTv.SeriesTimerCreated += OnScheduleChanged;
         LiveTv.TimerCancelled += OnScheduleChanged;
@@ -103,6 +118,16 @@ public sealed class ScheduleManager : BackgroundService
             LiveTv.SeriesTimerCreated -= OnScheduleChanged;
             LiveTv.TimerCancelled -= OnScheduleChanged;
             _soon.Dispose();
+            _taskManager.TaskCompleted -= OnTaskCompleted;
+            _afterGuide.Dispose();
+        }
+    }
+
+    private void OnTaskCompleted(object? sender, TaskCompletionEventArgs e)
+    {
+        if (e.Task.ScheduledTask.Key == "RefreshGuide")
+        {
+            _afterGuide?.Change(TimeSpan.FromMinutes(3), Timeout.InfiniteTimeSpan);
         }
     }
 
@@ -130,6 +155,7 @@ public sealed class ScheduleManager : BackgroundService
         try
         {
             var cfg = Config;
+            await RunFavouritesAsync(cfg, ct).ConfigureAwait(false);
             var plan = await BuildPlanAsync(cfg, ct).ConfigureAwait(false);
             plan.Reason = reason;
             LastPlan = plan;
@@ -191,6 +217,56 @@ public sealed class ScheduleManager : BackgroundService
         return await RunAsync("record this instead", ct).ConfigureAwait(false);
     }
 
+    // Schedules what the favourites match (one-off timers), before conflicts are planned.
+    private async Task RunFavouritesAsync(PluginConfiguration cfg, CancellationToken ct)
+    {
+        var rules = cfg.Favourites ?? Array.Empty<FavouriteRule>();
+        if (!rules.Any(r => r.Enabled))
+        {
+            LastFavourites = Array.Empty<FavouriteHit>();
+            return;
+        }
+
+        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        var hits = _favourites.Find(rules, timers);
+        foreach (var hit in hits.Where(h => h.Status == FavouriteHit.WillRecord))
+        {
+            ct.ThrowIfCancellationRequested();
+            var record = new ActionRecord
+            {
+                Time = DateTime.UtcNow,
+                Title = hit.Title,
+                Start = hit.Start,
+                Channel = hit.Channel,
+                Action = "favourite: scheduled (" + hit.RuleTitle + ")",
+                ProgramId = hit.ProgramId
+            };
+            try
+            {
+                _favourites.Remember(hit); // before the timer: the "recordings changed" re-plan must see it
+                await CreateTimerAsync(hit.ProgramId, null, null, ct).ConfigureAwait(false);
+                record.Ok = true;
+                _logger.LogInformation("Favourite {Rule}: scheduled {Title} at {Start:u} on {Channel}", hit.RuleTitle, hit.Title, hit.Start, hit.Channel);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                record.Error = ex.Message;
+                _logger.LogWarning(ex, "Favourite {Rule}: could not schedule {Title}", hit.RuleTitle, hit.Title);
+            }
+
+            Remember(record);
+        }
+
+        LastFavourites = hits;
+    }
+
+    /// <summary>What the favourites (or one rule being edited) would match now, without scheduling anything.</summary>
+    public async Task<List<FavouriteHit>> PreviewFavouritesAsync(IEnumerable<FavouriteRule> rules, CancellationToken ct)
+    {
+        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        return _favourites.Find(rules, timers);
+    }
+
     // ---- planning --------------------------------------------------------------------------
 
     private async Task<SchedulePlan> BuildPlanAsync(PluginConfiguration cfg, CancellationToken ct)
@@ -203,7 +279,7 @@ public sealed class ScheduleManager : BackgroundService
         var plan = new SchedulePlan { CreatedUtc = now, Mode = cfg.Mode, Capacity = capacity };
 
         var seriesTimers = (await LiveTv.GetSeriesTimers(new SeriesTimerQuery(), ct).ConfigureAwait(false)).Items;
-        plan.Series = OrderedSeries(cfg, seriesTimers).Select(s => new SeriesEntry(s.Id, s.Name, s.RecordAnyChannel ? "any channel" : s.ChannelName ?? string.Empty)).ToList();
+        plan.Series = OrderedEntries(cfg, seriesTimers);
         if (capacity <= 0)
         {
             plan.Warning = "The tuner count is unlimited in Jellyfin; set \"Tuner inputs\" so conflicts can be found.";
@@ -271,8 +347,9 @@ public sealed class ScheduleManager : BackgroundService
         return plan;
     }
 
-    private static int RankFor(string? seriesTimerId, bool isPinned, PluginConfiguration cfg, Dictionary<string, int> seriesRank) =>
+    private static int RankFor(string? seriesTimerId, bool isPinned, PluginConfiguration cfg, Dictionary<string, int> seriesRank, string? favouriteRuleId = null) =>
         isPinned ? PinnedRank
+        : favouriteRuleId is not null ? (seriesRank.TryGetValue(FavouriteKey(favouriteRuleId), out var fr) ? fr : 1)
         : string.IsNullOrEmpty(seriesTimerId) ? (cfg.OneOffAboveSeries ? 100000 : 5000)
         : seriesRank.TryGetValue(seriesTimerId!, out var r) ? r : 1;
 
@@ -293,7 +370,7 @@ public sealed class ScheduleManager : BackgroundService
             o.ChannelName,
             program.StartDate - before,
             program.EndDate.Value + after,
-            RankFor(o.SeriesTimerId, pinned.Contains(o.ProgramId), cfg, seriesRank),
+            RankFor(o.SeriesTimerId, pinned.Contains(o.ProgramId), cfg, seriesRank, _favourites.RuleByProgram().TryGetValue(o.ProgramId, out var fav) ? fav : null),
             false,
             program.ShowId,
             o.ProgramId,
@@ -309,7 +386,8 @@ public sealed class ScheduleManager : BackgroundService
     private PlannedRecording ToPlanned(TimerInfoDto t, PluginConfiguration cfg, Dictionary<string, int> seriesRank, HashSet<Guid> pinned)
     {
         var program = Guid.TryParse(t.ProgramId, out var pid) ? _libraryManager.GetItemById(pid) as LiveTvProgram : null;
-        var rank = RankFor(t.SeriesTimerId, pinned.Contains(pid), cfg, seriesRank);
+        var favourite = string.IsNullOrEmpty(t.SeriesTimerId) && _favourites.RuleByProgram().TryGetValue(pid, out var fav) ? fav : null;
+        var rank = RankFor(t.SeriesTimerId, pinned.Contains(pid), cfg, seriesRank, favourite);
         var title = string.IsNullOrWhiteSpace(program?.EpisodeTitle) ? t.Name : t.Name + " - " + program!.EpisodeTitle;
         var before = TimeSpan.FromSeconds(Math.Max(0, t.PrePaddingSeconds));
         var after = TimeSpan.FromSeconds(Math.Max(0, t.PostPaddingSeconds));
@@ -329,7 +407,7 @@ public sealed class ScheduleManager : BackgroundService
             before,
             after,
             program?.IsRepeat ?? false,
-            string.IsNullOrEmpty(t.SeriesTimerId),
+            string.IsNullOrEmpty(t.SeriesTimerId) && favourite is null,
             pinned.Contains(pid));
     }
 
@@ -355,11 +433,19 @@ public sealed class ScheduleManager : BackgroundService
                 StringComparer.Ordinal);
     }
 
-    private static IEnumerable<SeriesTimerInfoDto> OrderedSeries(PluginConfiguration cfg, IEnumerable<SeriesTimerInfoDto> all)
+    // Series recordings and favourites ("fav:" + rule id) in the configured priority order; ones not
+    // ordered yet go last, by name.
+    private static List<SeriesEntry> OrderedEntries(PluginConfiguration cfg, IEnumerable<SeriesTimerInfoDto> all)
     {
-        var order = (cfg.SeriesPriority ?? Array.Empty<string>()).Select((id, i) => (id, i)).ToDictionary(x => x.id, x => x.i, StringComparer.Ordinal);
-        return all.OrderBy(s => order.TryGetValue(s.Id, out var i) ? i : int.MaxValue).ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase);
+        var order = (cfg.SeriesPriority ?? Array.Empty<string>()).Select((id, i) => (id, i))
+            .GroupBy(x => x.id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First().i, StringComparer.Ordinal);
+        var entries = all.Select(s => new SeriesEntry(s.Id, s.Name, s.RecordAnyChannel ? "any channel" : s.ChannelName ?? string.Empty))
+            .Concat((cfg.Favourites ?? Array.Empty<FavouriteRule>()).Where(f => f.Enabled && !string.IsNullOrWhiteSpace(f.Title))
+                .Select(f => new SeriesEntry(FavouriteKey(f.Id), "★ " + f.Title, "favourite" + (string.IsNullOrWhiteSpace(f.Channels) ? string.Empty : " · " + f.Channels))));
+        return entries.OrderBy(e => order.TryGetValue(e.Id, out var i) ? i : int.MaxValue).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
+
+    public static string FavouriteKey(string ruleId) => "fav:" + ruleId;
 
     // JellyDVR Live's buffer timers (read from its shared file; no code dependency).
     private HashSet<string> LiveBufferTimerIds()
