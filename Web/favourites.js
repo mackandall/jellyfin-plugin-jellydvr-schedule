@@ -1,6 +1,6 @@
 /*
  * JellyDVR Schedule — Favourites list in jellyfin-web, at the top of Live TV > Series (next to the
- * series recordings), for everyone allowed to manage recordings: each favourite with its next
+ * series recordings) and of Jellyfin's own Favorites page, for everyone allowed to manage recordings: each favourite with its next
  * recordings, and add / edit / switch off / remove. Admins also have the plugin's settings page
  * (priority order, preview).
  *
@@ -48,13 +48,29 @@
     return new Date(iso).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   }
 
-  function onSeriesTab() {
+  function tabOf(route) {
     var hash = window.location.hash || '';
-    if (hash.indexOf('#/livetv') !== 0) {
-      return false;
+    if (hash.indexOf(route) !== 0) {
+      return null;
     }
     var q = hash.indexOf('?') >= 0 ? new URLSearchParams(hash.slice(hash.indexOf('?') + 1)) : null;
-    return !!q && q.get('tab') === SERIES_TAB;
+    return q ? q.get('tab') : null;
+  }
+
+  /*
+   * Where the list goes: the top of Live TV > Series, and the top of Jellyfin's own Favorites page
+   * (the header's "Favorites" link, the home page's tab 1: `#indexPage .tabContent[data-index="1"]`),
+   * since that's where people look for their favourites. The hearted items stay below it there.
+   */
+  function hostElement() {
+    if (tabOf('#/livetv') === SERIES_TAB) {
+      var page = document.querySelector('#liveTvPage');
+      return page && (page.querySelector('.padded-bottom-page') || page);
+    }
+    if (tabOf('#/home') === '1') {
+      return document.querySelector('#indexPage:not(.hide) .tabContent[data-index="1"]');
+    }
+    return null;
   }
 
   function load(force) {
@@ -232,15 +248,14 @@
 
   function ensureSection() {
     var existing = document.getElementById(SECTION_ID);
-    if (!onSeriesTab()) {
+    var host = hostElement();
+    if (!host) {
       if (existing) {
         existing.parentNode.removeChild(existing);
       }
       return;
     }
-    var page = document.querySelector('#liveTvPage');
-    var host = page && (page.querySelector('.padded-bottom-page') || page);
-    if (!host || (existing && host.contains(existing))) {
+    if (existing && host.contains(existing)) {
       return;
     }
     if (existing) {
@@ -250,8 +265,12 @@
     section.id = SECTION_ID;
     section.className = 'verticalSection padded-left padded-right';
     section.style.cssText = 'margin-bottom:1.5em;';
+    var onFavoritesPage = tabOf('#/home') === '1';
+    if (onFavoritesPage) {
+      section.style.cssText += 'padding-top:1em;';
+    }
     section.innerHTML = '<div class="jdvrFavHead sectionTitleContainer" style="display:flex;align-items:center;gap:1em;">' +
-      '<h2 class="sectionTitle" style="margin:.4em 0;">Favourites</h2></div>' +
+      '<h2 class="sectionTitle" style="margin:.4em 0;">' + (onFavoritesPage ? 'Favourite shows (recorded automatically)' : 'Favourites') + '</h2></div>' +
       '<div id="' + SECTION_ID + 'Status" style="opacity:.85;font-size:.9em;"></div>' +
       '<div class="jdvrFavList"></div>';
     host.insertBefore(section, host.firstChild);
