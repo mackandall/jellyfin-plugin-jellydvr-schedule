@@ -55,6 +55,10 @@
                     <button is="emby-button" type="button" id="DsAddFavourite" class="raised emby-button" style="margin-top:.4em;">
                         <span>+ Add favourite</span>
                     </button>
+                    <button is="emby-button" type="button" id="DsFromSeries" class="raised emby-button" style="margin-top:.4em;">
+                        <span>Add favourites for my series recordings</span>
+                    </button>
+                    <div id="DsFromSeriesNote" class="fieldDescription"></div>
                 </div>
 
                 <div class="verticalSection">
@@ -350,6 +354,21 @@
             });
 
             page.querySelector("#DsRun").addEventListener("click", run);
+
+            // One favourite per series recording (not yet covered), added to the list for review; Save keeps them.
+            // The series recordings stay: a favourite leaves the airings they already scheduled alone.
+            page.querySelector("#DsFromSeries").addEventListener("click", function () {
+                var note = page.querySelector("#DsFromSeriesNote");
+                api("GET", "JellyDvrSchedule/Favourites/FromSeries").then(function (rules) {
+                    var have = favourites.map(function (f) { return (f.Title || "").trim().toLowerCase(); });
+                    var added = rules.filter(function (r) { return have.indexOf(r.Title.trim().toLowerCase()) === -1; });
+                    added.forEach(function (r) { r.Id = newId(); favourites.push(r); });
+                    renderFavourites();
+                    note.textContent = added.length
+                        ? "Added " + added.length + " favourite(s) from your series recordings: " + added.map(function (r) { return r.Title; }).join(", ") + ". Review them, then Save. Your series recordings stay as they are."
+                        : "Every series recording already has a favourite.";
+                }, function () { note.textContent = "Could not read the series recordings."; });
+            });
 
             page.querySelector("#DsAddFavourite").addEventListener("click", function () {
                 favourites.push({ Id: newId(), Title: "", Match: "title", Channels: "", NewOnly: false, Type: "any", SkipInLibrary: true, Enabled: true });

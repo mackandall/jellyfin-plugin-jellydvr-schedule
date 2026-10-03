@@ -73,6 +73,50 @@ public sealed class ScheduleController : ControllerBase
         return Ok(hits.Select(FavouriteDto));
     }
 
+    /// <summary>
+    /// Favourites matching each series recording (title, its channel unless it records on any channel,
+    /// new-only and skip-in-library as set), for series not already covered by a favourite of the same
+    /// title. Saves nothing: the settings page adds them to the list for review.
+    /// </summary>
+    [HttpGet("Favourites/FromSeries")]
+    [Authorize(Policy = Policies.RequiresElevation)]
+    public async Task<IActionResult> FavouritesFromSeries(CancellationToken cancellationToken)
+    {
+        var liveTv = HttpContext.RequestServices.GetService(typeof(ILiveTvManager)) as ILiveTvManager;
+        if (liveTv is null)
+        {
+            return Ok(Array.Empty<object>());
+        }
+
+        var existing = (Plugin.Instance?.Configuration.Favourites ?? Array.Empty<Configuration.FavouriteRule>())
+            .Select(f => FavouriteMatcher.Normalize(f.Title))
+            .ToHashSet(StringComparer.Ordinal);
+        var series = (await liveTv.GetSeriesTimers(new MediaBrowser.Model.LiveTv.SeriesTimerQuery(), cancellationToken).ConfigureAwait(false)).Items;
+        var rules = series
+            .Where(s => !string.IsNullOrWhiteSpace(s.Name) && !existing.Contains(FavouriteMatcher.Normalize(s.Name)))
+            .GroupBy(s => FavouriteMatcher.Normalize(s.Name))
+            .Select(g =>
+            {
+                var anyChannel = g.Any(s => s.RecordAnyChannel);
+                var numbers = anyChannel
+                    ? Array.Empty<string>()
+                    : g.Select(s => (_libraryManager.GetItemById(s.ChannelId) as LiveTvChannel)?.Number).OfType<string>().Distinct().ToArray();
+                return new Configuration.FavouriteRule
+                {
+                    Title = g.First().Name,
+                    Match = Configuration.FavouriteRule.MatchTitle,
+                    Channels = string.Join(", ", numbers),
+                    NewOnly = g.All(s => s.RecordNewOnly),
+                    Type = Configuration.FavouriteRule.TypeSeries,
+                    SkipInLibrary = g.Any(s => s.SkipEpisodesInLibrary),
+                    Enabled = true
+                };
+            })
+            .OrderBy(r => r.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return Ok(rules);
+    }
+
     private static object FavouriteDto(FavouriteHit h) => new { h.ProgramId, h.RuleId, h.RuleTitle, h.Title, h.Channel, h.Start, h.End, h.Status };
 
     /// <summary>What the scheduler did with one guide airing: skipped / moved / dropped, and whether it is pinned.</summary>
