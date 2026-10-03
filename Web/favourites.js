@@ -237,8 +237,8 @@
     if (!data.Favourites.length && editing !== 'new') {
       var empty = document.createElement('div');
       empty.style.cssText = 'opacity:.75;padding:.5em 0;';
-      empty.textContent = 'No favourites yet. A favourite records a show by its title on any channel, whatever the guide calls it'
-        + (data.CanManage ? '. Use + Add, or "Add to favourites" in the guide.' : '.');
+      empty.textContent = 'No recording favourites yet. A recording favourite records a show by its title on any channel, whatever the guide calls it'
+        + (data.CanManage ? '. Use + Add, or "Add to Recording Favourites" in the guide or a show\'s ⋮ menu.' : '.');
       list.appendChild(empty);
     }
     data.Favourites.slice().sort(function (a, b) { return a.Title.localeCompare(b.Title); }).forEach(function (f) {
@@ -270,7 +270,7 @@
       section.style.cssText += 'padding-top:1em;';
     }
     section.innerHTML = '<div class="jdvrFavHead sectionTitleContainer" style="display:flex;align-items:center;gap:1em;">' +
-      '<h2 class="sectionTitle" style="margin:.4em 0;">' + (onFavoritesPage ? 'Favourite shows (recorded automatically)' : 'Favourites') + '</h2></div>' +
+      '<h2 class="sectionTitle" style="margin:.4em 0;">Recording Favourites</h2></div>' +
       '<div id="' + SECTION_ID + 'Status" style="opacity:.85;font-size:.9em;"></div>' +
       '<div class="jdvrFavList"></div>';
     host.insertBefore(section, host.firstChild);
@@ -290,8 +290,344 @@
       scheduled = false;
       if (window.ApiClient && window.ApiClient.getCurrentUserId && window.ApiClient.getCurrentUserId()) {
         ensureSection();
+        checkMenus();
       }
-    }, 150);
+    }, 100);
+  }
+
+  /*
+   * "Add to Recording Favourites" wherever a show turns up: the ⋮ menu (or right-click) of
+   * programme cards (Programs > On Now / Shows…), recordings, series, episodes and movies, the ⋮
+   * button on their details pages, and below Record on a programme's details page. For a show a
+   * favourite already covers it says "Remove from Recording Favourites" (second press confirms;
+   * removing cancels the upcoming recordings it scheduled).
+   */
+  var MENU_ID = 'jdvr-favourite';
+  var ROW_CLASS = 'jdvrFavouriteDetailsRow';
+  var SHOW_TYPES = ['Program', 'Series', 'Season', 'Episode', 'Movie', 'Recording', 'Video'];
+  var menuItemId = null;
+  var menuClickedAt = 0;
+  var forItem = {};
+
+  function detailsId() {
+    var hash = window.location.hash || '';
+    return hash.indexOf('#/details') === 0 ? new URLSearchParams(hash.slice(hash.indexOf('?') + 1)).get('id') : null;
+  }
+
+  function rememberMenuItem(e, isContextMenu) {
+    var target = e.target;
+    if (!target || !target.closest) {
+      return;
+    }
+    var card = target.closest('[data-id][data-type]');
+    if (card && !card.classList.contains('actionSheetMenuItem') && SHOW_TYPES.indexOf(card.getAttribute('data-type')) !== -1
+      && (isContextMenu || target.closest('[data-action="menu"]'))) {
+      menuItemId = card.getAttribute('data-id');
+      menuClickedAt = Date.now();
+      return;
+    }
+    // The ⋮ button on a details page.
+    if (target.closest('.btnMoreCommands') && detailsId()) {
+      menuItemId = detailsId();
+      menuClickedAt = Date.now();
+    }
+  }
+
+  document.addEventListener('click', function (e) { rememberMenuItem(e, false); }, true);
+  document.addEventListener('contextmenu', function (e) { rememberMenuItem(e, true); }, true);
+
+  // What the plugin says about an item's show (cached a little; null = not a show / no plugin).
+  function lookup(id) {
+    var c = forItem[id];
+    if (c && (c === 'pending' || Date.now() - c.at < 20000)) {
+      return c === 'pending' ? null : c.info;
+    }
+    forItem[id] = 'pending';
+    api('GET', 'JellyDvrSchedule/Favourites/ForItem/' + id)
+      .then(function (info) { forItem[id] = { at: Date.now(), info: info }; scheduleCheck(); },
+        function () { forItem[id] = { at: Date.now(), info: null }; });
+    return null;
+  }
+
+  function toast(msg) {
+    var t = document.createElement('div');
+    t.textContent = msg;
+    t.style.cssText = 'position:fixed;left:50%;bottom:8%;transform:translateX(-50%);z-index:100001;background:#303030;color:#fff;padding:.8em 1.2em;border-radius:.4em;box-shadow:0 0 1em rgba(0,0,0,.5);max-width:80%;';
+    document.body.appendChild(t);
+    setTimeout(function () { t.parentNode && t.parentNode.removeChild(t); }, 4000);
+  }
+
+  // Add or remove; calls back with the message once done.
+  function toggle(id, info, done) {
+    var call = info.Favourite
+      ? api('DELETE', 'JellyDvrSchedule/Favourites/' + info.Favourite.Id)
+      : api('POST', 'JellyDvrSchedule/Favourites/FromItem/' + id);
+    call.then(function (r) {
+      delete forItem[id];
+      data = null; // the lists reload with the change
+      done((r && r.Message) || '');
+    }, function () { done('Could not change the recording favourite.'); });
+  }
+
+  function label(info, armed) {
+    return info.Favourite ? (armed ? 'Press again to remove from Recording Favourites' : 'Remove from Recording Favourites') : 'Add to Recording Favourites';
+  }
+
+  function checkActionSheet() {
+    var scroller = document.querySelector('.actionSheet.opened .actionSheetScroller');
+    if (!scroller || !menuItemId || Date.now() - menuClickedAt > 5000 || scroller.querySelector('[data-id="' + MENU_ID + '"]')) {
+      return;
+    }
+    var id = menuItemId;
+    var info = lookup(id);
+    if (!info) {
+      return; // not loaded yet (re-checked when it is), or not a show
+    }
+    var armed = false;
+    var item = document.createElement('button');
+    item.setAttribute('is', 'emby-button');
+    item.type = 'button';
+    item.className = 'listItem listItem-button actionSheetMenuItem emby-button';
+    item.setAttribute('data-id', MENU_ID);
+    item.innerHTML = '<span class="actionsheetMenuItemIcon listItemIcon listItemIcon-transparent material-icons" aria-hidden="true" style="color:#f5c518;"></span>'
+      + '<div class="listItemBody actionsheetListItemBody"><div class="listItemBodyText actionSheetItemText"></div></div>';
+    item.querySelector('.material-icons').textContent = info.Favourite ? 'star' : 'star_border';
+    item.querySelector('.actionSheetItemText').textContent = label(info, false);
+    item.addEventListener('click', function (e) {
+      if (info.Favourite && !armed) {
+        // Keep the sheet open for the confirming press.
+        e.stopPropagation();
+        e.preventDefault();
+        armed = true;
+        item.querySelector('.actionSheetItemText').textContent = label(info, true);
+        return;
+      }
+      toggle(id, info, toast);
+    }, true);
+    scroller.appendChild(item);
+  }
+
+  // Below Record on a programme's details page (opened from a programme tile).
+  function checkDetailsRow() {
+    var id = detailsId();
+    var page = document.querySelector('.page:not(.hide)');
+    if (!page) {
+      return;
+    }
+    [].slice.call(page.querySelectorAll('.' + ROW_CLASS)).forEach(function (el) {
+      if (el.getAttribute('data-item') !== id) {
+        el.parentNode.removeChild(el);
+      }
+    });
+    if (!id || page.querySelector('.' + ROW_CLASS)) {
+      return;
+    }
+    var record = [].slice.call(page.querySelectorAll('.recordingFields-buttons'))
+      .filter(function (r) { return r.offsetParent !== null && !r.classList.contains(ROW_CLASS); }).pop();
+    if (!record) {
+      return;
+    }
+    var info = lookup(id);
+    if (!info) {
+      return;
+    }
+    var row = document.createElement('div');
+    row.className = 'recordingFields-buttons flex align-items-center ' + ROW_CLASS;
+    row.setAttribute('data-item', id);
+    row.innerHTML = '<div><button is="emby-button" type="button" class="raised recordingButton emby-button">'
+      + '<span class="material-icons recordingIcon" aria-hidden="true" style="color:#f5c518;"></span><span class="buttonText"></span></button>'
+      + '<div class="fieldDescription" style="margin:.3em 0 0 .2em;opacity:.8;"></div></div>';
+    var button = row.querySelector('button');
+    var note = row.querySelector('.fieldDescription');
+    var armed = false;
+    function show() {
+      row.querySelector('.recordingIcon').textContent = info.Favourite ? 'star' : 'star_border';
+      row.querySelector('.buttonText').textContent = label(info, armed);
+    }
+    show();
+    button.addEventListener('click', function () {
+      if (info.Favourite && !armed) {
+        armed = true;
+        show();
+        setTimeout(function () { armed = false; show(); }, 4000);
+        return;
+      }
+      button.disabled = true;
+      toggle(id, info, function (msg) {
+        note.textContent = msg;
+        button.disabled = false;
+        armed = false;
+        info = { Title: info.Title, IsMovie: info.IsMovie, Favourite: info.Favourite ? null : { Id: '', Title: info.Title } };
+        // Re-read the real state (the new favourite's id) shortly.
+        setTimeout(function () { delete forItem[id]; var fresh = lookup(id); if (fresh) { info = fresh; show(); } }, 1500);
+        show();
+      });
+    });
+    record.parentNode.insertBefore(row, record.nextSibling);
+  }
+
+  /*
+   * Live TV > Schedule: jellyfin-web shows the upcoming recordings as large picture cards in a
+   * sideways row per day, which is slow to get through when a show has many recordings in a day.
+   * A Cards | List switch adds a compact list instead: one row per recording, grouped by day,
+   * stacked so the arrow keys go straight down it; selecting a row opens the programme.
+   */
+  var SCHEDULE_TAB = '4';
+  var VIEW_KEY = 'jdvr.scheduleView';
+  var BAR_ID = 'jdvrScheduleBar';
+  var LIST_ID = 'jdvrScheduleList';
+  var upcoming = null;
+  var upcomingAt = 0;
+
+  function scheduleView() {
+    try {
+      return localStorage.getItem(VIEW_KEY) || 'cards';
+    } catch (e) {
+      return 'cards';
+    }
+  }
+
+  function setScheduleView(v) {
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch (e) { /* private window */ }
+    checkSchedule(true);
+  }
+
+  function timeOnly(iso) {
+    return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+
+  function dayOf(iso) {
+    return new Date(iso).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+  }
+
+  function badge(text, colour, fill) {
+    return '<span style="font-size:.8em;padding:.05em .45em;border-radius:.3em;margin-left:.4em;white-space:nowrap;'
+      + (fill ? 'background:' + colour + ';color:#111;font-weight:600;' : 'border:1px solid ' + colour + ';color:' + colour + ';') + '">' + esc(text) + '</span>';
+  }
+
+  function renderSchedule(list) {
+    list.innerHTML = '';
+    if (!upcoming) {
+      list.textContent = 'Loading…';
+      return;
+    }
+    if (!upcoming.length) {
+      list.textContent = 'Nothing scheduled.';
+      return;
+    }
+    var day = null;
+    upcoming.forEach(function (r) {
+      var d = dayOf(r.Start);
+      if (d !== day) {
+        day = d;
+        var h = document.createElement('h2');
+        h.className = 'sectionTitle';
+        h.style.cssText = 'margin:1em 0 .3em;';
+        h.textContent = d + ' (' + upcoming.filter(function (x) { return dayOf(x.Start) === d; }).length + ')';
+        list.appendChild(h);
+      }
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'emby-button focusable';
+      row.style.cssText = 'display:flex;width:100%;align-items:center;gap:1em;text-align:left;background:rgba(255,255,255,.04);'
+        + 'border:0;border-bottom:1px solid rgba(128,128,128,.2);color:inherit;padding:.55em .8em;font-size:1em;cursor:pointer;';
+      var sub = [r.SeasonEpisode, r.EpisodeTitle].filter(function (x) { return !!x; }).join(' · ');
+      row.innerHTML = '<span style="width:9.5em;flex:none;opacity:.9;">' + esc(timeOnly(r.Start)) + ' – ' + esc(timeOnly(r.End)) + '</span>'
+        + '<span style="width:9em;flex:none;opacity:.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'
+        + esc([r.ChannelNumber, r.ChannelName].filter(function (x) { return !!x; }).join(' ')) + '</span>'
+        + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><b>' + esc(r.Name) + '</b>'
+        + (sub ? ' <span style="opacity:.75;">— ' + esc(sub) + '</span>' : '') + '</span>'
+        + '<span style="flex:none;">'
+        + (r.RecordingNow ? badge('● Recording', '#e53935', true) : '')
+        + (r.Kind === 'favourite' ? badge('★ ' + (r.Favourite || 'Favourite'), '#f5c518', false) : r.Kind === 'series' ? badge('Series', '#9aa0a6', false) : badge('One-off', '#9aa0a6', false))
+        + (r.IsRepeat ? badge('Repeat', '#9aa0a6', false) : '')
+        + '</span>';
+      if (r.ProgramId) {
+        row.addEventListener('click', function () {
+          window.location.hash = '#/details?id=' + r.ProgramId.replace(/-/g, '') + '&serverId=' + encodeURIComponent(window.ApiClient.serverId());
+        });
+      }
+      list.appendChild(row);
+    });
+  }
+
+  function loadUpcoming(force) {
+    if (!force && upcoming && Date.now() - upcomingAt < 60000) {
+      return Promise.resolve(upcoming);
+    }
+    return api('GET', 'JellyDvrSchedule/Upcoming').then(function (r) {
+      upcoming = r;
+      upcomingAt = Date.now();
+      return r;
+    });
+  }
+
+  function checkSchedule(force) {
+    var page = document.querySelector('#liveTvPage');
+    var bar = document.getElementById(BAR_ID);
+    var list = document.getElementById(LIST_ID);
+    if (!page || tabOf('#/livetv') !== SCHEDULE_TAB) {
+      if (bar) { bar.parentNode.removeChild(bar); }
+      if (list) { list.parentNode.removeChild(list); }
+      if (page) { page.classList.remove('jdvr-list-mode'); }
+      return;
+    }
+    if (!document.getElementById('jdvrScheduleStyle')) {
+      var style = document.createElement('style');
+      style.id = 'jdvrScheduleStyle';
+      style.textContent = '#liveTvPage.jdvr-list-mode > .verticalSection { display: none !important; }'
+        + ' #' + LIST_ID + ' button:focus { outline: 2px solid #00a4dc; background: rgba(0,164,220,.15) !important; }';
+      document.head.appendChild(style);
+    }
+    var view = scheduleView();
+    if (!bar || bar.parentNode !== page) {
+      bar && bar.parentNode && bar.parentNode.removeChild(bar);
+      bar = document.createElement('div');
+      bar.id = BAR_ID;
+      bar.className = 'padded-left padded-right';
+      bar.style.cssText = 'display:flex;gap:.4em;align-items:center;padding:.6em 0;';
+      page.insertBefore(bar, page.firstChild);
+    }
+    if (force || bar.getAttribute('data-view') !== view) {
+      bar.setAttribute('data-view', view);
+      bar.innerHTML = '<span style="opacity:.75;margin-right:.4em;">View:</span>';
+      ['cards', 'list'].forEach(function (v) {
+        var b = button(v === 'cards' ? 'Cards' : 'List', v === view, function () { setScheduleView(v); });
+        bar.appendChild(b);
+      });
+    }
+    page.classList.toggle('jdvr-list-mode', view === 'list');
+    if (view !== 'list') {
+      if (list) { list.parentNode.removeChild(list); }
+      return;
+    }
+    if (!list || list.parentNode !== page) {
+      list && list.parentNode && list.parentNode.removeChild(list);
+      list = document.createElement('div');
+      list.id = LIST_ID;
+      list.className = 'padded-left padded-right';
+      page.insertBefore(list, bar.nextSibling);
+      renderSchedule(list);
+      force = true;
+    }
+    if (force || Date.now() - upcomingAt > 60000) {
+      upcomingAt = Date.now(); // one load at a time
+      loadUpcoming(true).then(function () { var l = document.getElementById(LIST_ID); if (l) { renderSchedule(l); } }, function () {
+        var l = document.getElementById(LIST_ID);
+        if (l) { l.textContent = 'Could not load the schedule.'; }
+      });
+    }
+  }
+
+  function checkMenus() {
+    if (!(window.ApiClient && window.ApiClient.getCurrentUserId && window.ApiClient.getCurrentUserId())) {
+      return;
+    }
+    checkActionSheet();
+    checkDetailsRow();
+    checkSchedule(false);
   }
 
   new MutationObserver(scheduleCheck).observe(document.body, { childList: true, subtree: true });

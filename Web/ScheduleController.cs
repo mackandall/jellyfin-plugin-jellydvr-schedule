@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.DvrSchedule.Schedule;
 using MediaBrowser.Common.Api;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
 using Microsoft.AspNetCore.Authorization;
@@ -144,29 +145,81 @@ public sealed class ScheduleController : ControllerBase
     }
 
     /// <summary>
-    /// "Add to favourites" from the guide: an exact-title favourite for this show (any channel; shows
-    /// or movies to match it; skips episodes already in the library). Its upcoming airings are
-    /// scheduled right after (in the background; the guide shows them as they're created).
+    /// The show (or movie) an item stands for, as a favourite would name it: a guide programme's
+    /// title, a recorded episode's series, a series, a movie. The guide may put a year in brackets
+    /// after the name; favourites match without it, so it's left off.
     /// </summary>
-    [HttpPost("Favourites/FromProgram/{programId}")]
-    [Authorize(Policy = Policies.LiveTvManagement)]
-    public IActionResult AddFavouriteFromProgram([FromRoute] Guid programId)
+    private (string Title, bool IsMovie)? ShowOf(BaseItem? item)
     {
-        if (_libraryManager.GetItemById(programId) is not LiveTvProgram program || Plugin.Instance is not { } plugin)
+        string? title = item switch
+        {
+            LiveTvProgram p => p.Name,
+            MediaBrowser.Controller.Entities.TV.Episode e => e.SeriesName ?? e.Series?.Name,
+            MediaBrowser.Controller.Entities.TV.Season s => s.SeriesName ?? s.Series?.Name,
+            MediaBrowser.Controller.Entities.TV.Series s => s.Name,
+            MediaBrowser.Controller.Entities.Movies.Movie m => m.Name,
+            Video v => v.Name,
+            _ => null
+        };
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return null;
+        }
+
+        title = System.Text.RegularExpressions.Regex.Replace(title, @"\s*\(\d{4}\)\s*$", string.Empty).Trim();
+        var isMovie = item is MediaBrowser.Controller.Entities.Movies.Movie || (item is LiveTvProgram lp && lp.IsMovie);
+        return (title, isMovie);
+    }
+
+    // The favourite covering a show: title and type (channels and "new only" don't matter here).
+    private static Configuration.FavouriteRule? FavouriteForShow(string title, bool isMovie) =>
+        (Plugin.Instance?.Configuration.Favourites ?? Array.Empty<Configuration.FavouriteRule>())
+            .FirstOrDefault(r => FavouriteMatcher.Matches(
+                new Configuration.FavouriteRule { Title = r.Title, Match = r.Match, Type = r.Type },
+                title,
+                isMovie,
+                false,
+                null,
+                null) && r.Enabled);
+
+    /// <summary>Which show an item stands for and the favourite covering it, for "Add to Recording Favourites" menus.</summary>
+    [HttpGet("Favourites/ForItem/{itemId}")]
+    [Authorize(Policy = Policies.LiveTvAccess)]
+    public IActionResult FavouriteForItem([FromRoute] Guid itemId)
+    {
+        if (ShowOf(_libraryManager.GetItemById(itemId)) is not { } show)
         {
             return NotFound();
         }
 
-        if (FavouriteFor(program) is { } existing)
+        var rule = FavouriteForShow(show.Title, show.IsMovie);
+        return Ok(new { show.Title, show.IsMovie, Favourite = rule is null ? null : new { rule.Id, rule.Title, rule.Match } });
+    }
+
+    /// <summary>
+    /// "Add to Recording Favourites" from a guide programme, a recording, a series or a movie: an
+    /// exact-title favourite for the show (any channel; shows or movies to match; skips episodes
+    /// already in the library). Its upcoming airings are scheduled right after, in the background.
+    /// </summary>
+    [HttpPost("Favourites/FromItem/{itemId}")]
+    [Authorize(Policy = Policies.LiveTvManagement)]
+    public IActionResult AddFavouriteFromItem([FromRoute] Guid itemId)
+    {
+        if (ShowOf(_libraryManager.GetItemById(itemId)) is not { } show || Plugin.Instance is not { } plugin)
         {
-            return Ok(new { existing.Id, existing.Title, Added = false, Message = "Already a favourite: " + existing.Title });
+            return NotFound();
+        }
+
+        if (FavouriteForShow(show.Title, show.IsMovie) is { } existing)
+        {
+            return Ok(new { existing.Id, existing.Title, Added = false, Message = "Already a recording favourite: " + existing.Title });
         }
 
         var rule = new Configuration.FavouriteRule
         {
-            Title = program.Name,
+            Title = show.Title,
             Match = Configuration.FavouriteRule.MatchTitle,
-            Type = program.IsMovie ? Configuration.FavouriteRule.TypeMovies : Configuration.FavouriteRule.TypeSeries,
+            Type = show.IsMovie ? Configuration.FavouriteRule.TypeMovies : Configuration.FavouriteRule.TypeSeries,
             SkipInLibrary = true,
             Enabled = true
         };
@@ -174,8 +227,13 @@ public sealed class ScheduleController : ControllerBase
         cfg.Favourites = (cfg.Favourites ?? Array.Empty<Configuration.FavouriteRule>()).Append(rule).ToArray();
         plugin.SaveConfiguration();
         _ = Task.Run(() => _manager.RunAsync("favourite added", CancellationToken.None));
-        return Ok(new { rule.Id, rule.Title, Added = true, Message = "Added to favourites: " + rule.Title + ". Upcoming airings are being scheduled." });
+        return Ok(new { rule.Id, rule.Title, Added = true, Message = "Added to recording favourites: " + rule.Title + ". Upcoming airings are being scheduled." });
     }
+
+    /// <summary>Kept for older clients: same as <see cref="AddFavouriteFromItem"/>.</summary>
+    [HttpPost("Favourites/FromProgram/{programId}")]
+    [Authorize(Policy = Policies.LiveTvManagement)]
+    public IActionResult AddFavouriteFromProgram([FromRoute] Guid programId) => AddFavouriteFromItem(programId);
 
     /// <summary>
     /// Removes a favourite and cancels the recordings it scheduled that haven't started (like cancelling
