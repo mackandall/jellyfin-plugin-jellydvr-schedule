@@ -108,8 +108,8 @@
         log('all ' + status.Capacity + ' inputs busy: not starting ' + (status.RequestedChannel || itemId));
         xhr.__jdvrHandled = true;
         lastCheck = { id: itemId, at: Date.now() };
+        suppressErrors(15000);
         show(status);
-        dismissPlaybackError(0);
         try {
           xhr.abort();
         } catch (e) { /* already done */ }
@@ -119,6 +119,8 @@
 
   var lastCheck = { id: null, at: 0 };
   function check(itemId) {
+    // Called on a failed start: keep Jellyfin's error hidden until we know why.
+    holdErrors();
     // One failed start can surface through both hooks.
     if (lastCheck.id === itemId && Date.now() - lastCheck.at < 5000) {
       return;
@@ -132,28 +134,112 @@
       .then(function (status) {
         if (status && status.IsChannel && status.Full) {
           log('live channel failed with all ' + status.Capacity + ' inputs busy');
-          dismissPlaybackError(0);
+          suppressErrors(8000);
           show(status);
+        } else {
+          releaseHeld(false);
         }
       })
-      .catch(function () { /* plugin missing or no Live TV access */ });
+      .catch(function () { releaseHeld(false); });
   }
 
-  // jellyfin-web's own error box may appear just before or after ours: close it for a few seconds.
-  function dismissPlaybackError(attempt) {
-    var dialogs = document.querySelectorAll('.dialogContainer .dialog');
-    for (var i = 0; i < dialogs.length; i++) {
-      var d = dialogs[i];
-      if (d.id !== OVERLAY_ID && !d.closest('#' + OVERLAY_ID) && /Playback Error/i.test(d.textContent || '')) {
-        var button = d.querySelector('button');
-        if (button) {
-          button.click();
-        }
+  /*
+   * jellyfin-web's own "Playback Error" box never shows for a start we handle. A MutationObserver
+   * callback runs before the browser paints, so the box (and its dark backdrop) is hidden the
+   * moment it's inserted:
+   *  - suppress: our box is already up (or about to be) — hide Jellyfin's and close it properly;
+   *  - hold: a channel start just failed and we're asking the server why — keep it hidden until
+   *    the answer: tuners all busy → close it (ours shows instead); anything else → reveal it,
+   *    since then it's the real message. A hold always ends within 3 s.
+   */
+  var suppressUntil = 0;
+  var holdUntil = 0;
+  var held = [];
+
+  function errorDialogs() {
+    return [].slice.call(document.querySelectorAll('.dialogContainer')).filter(function (c) {
+      return !c.closest('#' + OVERLAY_ID) && /Playback Error/i.test(c.textContent || '');
+    });
+  }
+
+  function hide(el) {
+    if (el && !el.hasAttribute('data-jdvr-hidden')) {
+      el.setAttribute('data-jdvr-hidden', el.style.visibility || '');
+      el.style.visibility = 'hidden';
+    }
+  }
+
+  function reveal(el) {
+    if (el && el.hasAttribute('data-jdvr-hidden')) {
+      el.style.visibility = el.getAttribute('data-jdvr-hidden');
+      el.removeAttribute('data-jdvr-hidden');
+    }
+  }
+
+  // The backdrop jellyfin-web's dialog helper adds for the box (the most recent one).
+  function backdropOf() {
+    var all = document.querySelectorAll('.dialogBackdrop');
+    return all.length ? all[all.length - 1] : null;
+  }
+
+  function closeDialog(container) {
+    var button = container.querySelector('button');
+    if (button) {
+      button.click();
+    }
+  }
+
+  new MutationObserver(function () {
+    var now = Date.now();
+    if (now >= suppressUntil && now >= holdUntil) {
+      return;
+    }
+    errorDialogs().forEach(function (c) {
+      if (c.hasAttribute('data-jdvr-seen')) {
+        return;
       }
-    }
-    if (attempt < 20) {
-      setTimeout(function () { dismissPlaybackError(attempt + 1); }, 400);
-    }
+      c.setAttribute('data-jdvr-seen', '');
+      var backdrop = backdropOf();
+      hide(c);
+      hide(backdrop);
+      if (now < suppressUntil) {
+        closeDialog(c);
+      } else {
+        held.push({ dialog: c, backdrop: backdrop });
+      }
+    });
+  }).observe(document.body, { childList: true, subtree: true, characterData: true });
+
+  function holdErrors() {
+    holdUntil = Date.now() + 3000;
+    setTimeout(function () {
+      if (Date.now() >= holdUntil) {
+        releaseHeld(false);
+      }
+    }, 3100);
+  }
+
+  function releaseHeld(close) {
+    holdUntil = 0;
+    held.forEach(function (h) {
+      if (close) {
+        closeDialog(h.dialog);
+      } else {
+        reveal(h.dialog);
+        reveal(h.backdrop);
+      }
+    });
+    held = [];
+  }
+
+  function suppressErrors(ms) {
+    suppressUntil = Date.now() + ms;
+    // One already on screen (inserted before we knew) goes too.
+    errorDialogs().forEach(function (c) {
+      hide(c);
+      closeDialog(c);
+    });
+    releaseHeld(true);
   }
 
   function time(iso) {
