@@ -174,6 +174,16 @@ public sealed class Favourites
         }
     }
 
+    /// <summary>Rule ids that scheduled something but are no longer in the settings (deleted however).</summary>
+    public IReadOnlyList<string> OrphanRuleIds(IEnumerable<FavouriteRule> rules)
+    {
+        var ids = rules.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        lock (_lock)
+        {
+            return _created.Select(c => c.RuleId).Distinct(StringComparer.Ordinal).Where(id => !ids.Contains(id)).ToList();
+        }
+    }
+
     /// <summary>Forgets what a removed rule scheduled.</summary>
     public void ForgetRule(string ruleId)
     {

@@ -221,6 +221,15 @@ public sealed class ScheduleManager : BackgroundService
     private async Task RunFavouritesAsync(PluginConfiguration cfg, CancellationToken ct)
     {
         var rules = cfg.Favourites ?? Array.Empty<FavouriteRule>();
+
+        // A favourite deleted any way (guide button, Live TV list, settings page) takes its
+        // not-yet-started recordings with it, like cancelling a series recording. (Switched off is
+        // different: it stops scheduling more but keeps what's scheduled.)
+        foreach (var orphan in _favourites.OrphanRuleIds(rules))
+        {
+            await CancelFavouriteRecordingsAsync(orphan, ct).ConfigureAwait(false);
+        }
+
         if (!rules.Any(r => r.Enabled))
         {
             LastFavourites = Array.Empty<FavouriteHit>();
