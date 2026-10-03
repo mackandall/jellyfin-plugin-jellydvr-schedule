@@ -347,5 +347,13 @@
     (first || ok).focus();
   }
 
+  // The Favourites list under Live TV > Series lives in its own file.
+  (function () {
+    var s = document.createElement('script');
+    s.defer = true;
+    s.src = '/JellyDvrSchedule/web/favourites.js';
+    document.head.appendChild(s);
+  })();
+
   log('tuners script loaded');
 })();

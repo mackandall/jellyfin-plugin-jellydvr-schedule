@@ -100,11 +100,19 @@ public sealed class TunersController : ControllerBase
     [HttpGet("web/tuners.js")]
     [AllowAnonymous]
     [Produces("application/javascript")]
-    public async Task<ContentResult> Script()
+    public Task<ContentResult> Script() => Embedded("tuners.js");
+
+    /// <summary>The Favourites list under Live TV > Series; tuners.js loads it.</summary>
+    [HttpGet("web/favourites.js")]
+    [AllowAnonymous]
+    [Produces("application/javascript")]
+    public Task<ContentResult> FavouritesScript() => Embedded("favourites.js");
+
+    private async Task<ContentResult> Embedded(string name)
     {
         var assembly = typeof(TunersController).Assembly;
-        await using var stream = assembly.GetManifestResourceStream(assembly.GetName().Name + ".Web.tuners.js")
-            ?? throw new FileNotFoundException("tuners.js");
+        await using var stream = assembly.GetManifestResourceStream(assembly.GetName().Name + ".Web." + name)
+            ?? throw new FileNotFoundException(name);
         using var reader = new StreamReader(stream);
         return Content(await reader.ReadToEndAsync().ConfigureAwait(false), "application/javascript");
     }
