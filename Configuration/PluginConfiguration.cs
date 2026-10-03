@@ -56,6 +56,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>A skipped recording whose programme is already on starts late (records the rest) once an input is free.</summary>
     public bool StartLateWhenFree { get; set; } = true;
 
+    /// <summary>
+    /// A new series recording whose episode is already on (Jellyfin starts recording it at once,
+    /// part-way through): record that episode at a later airing instead, when there is one.
+    /// </summary>
+    public bool MoveRunningEpisode { get; set; } = true;
+
     /// <summary>Title/keyword recording rules, independent of guide ids.</summary>
     public FavouriteRule[] Favourites { get; set; } = Array.Empty<FavouriteRule>();
 

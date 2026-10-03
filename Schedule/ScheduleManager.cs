@@ -99,6 +99,7 @@ public sealed class ScheduleManager : BackgroundService
         _taskManager.TaskCompleted += OnTaskCompleted;
         LiveTv.TimerCreated += OnScheduleChanged;
         LiveTv.SeriesTimerCreated += OnScheduleChanged;
+        LiveTv.SeriesTimerCreated += OnSeriesTimerCreated;
         LiveTv.TimerCancelled += OnScheduleChanged;
         try
         {
@@ -116,6 +117,7 @@ public sealed class ScheduleManager : BackgroundService
         {
             LiveTv.TimerCreated -= OnScheduleChanged;
             LiveTv.SeriesTimerCreated -= OnScheduleChanged;
+            LiveTv.SeriesTimerCreated -= OnSeriesTimerCreated;
             LiveTv.TimerCancelled -= OnScheduleChanged;
             _soon.Dispose();
             _taskManager.TaskCompleted -= OnTaskCompleted;
@@ -446,6 +448,129 @@ public sealed class ScheduleManager : BackgroundService
             program?.IsRepeat ?? false,
             string.IsNullOrEmpty(t.SeriesTimerId) && favourite is null,
             pinned.Contains(pid));
+    }
+
+    // Jellyfin starts recording a new series recording's current episode at once, part-way through.
+    // A few seconds after it's created (its episodes are scheduled by then), move that episode to a
+    // later airing when there is one.
+    private void OnSeriesTimerCreated(object? sender, Jellyfin.Data.Events.GenericEventArgs<TimerEventInfo> e)
+    {
+        var seriesTimerId = e.Argument?.Id;
+        var createdUtc = DateTime.UtcNow;
+        if (string.IsNullOrEmpty(seriesTimerId) || !Config.MoveRunningEpisode)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), _stopping).ConfigureAwait(false);
+                await _runLock.WaitAsync(_stopping).ConfigureAwait(false);
+                try
+                {
+                    await MoveRunningEpisodesAsync(seriesTimerId!, createdUtc, _stopping).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _runLock.Release();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Checking the new series recording's running episode failed");
+            }
+        });
+    }
+
+    private async Task MoveRunningEpisodesAsync(string seriesTimerId, DateTime createdUtc, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        var running = timers.Where(t => string.Equals(t.SeriesTimerId, seriesTimerId, StringComparison.OrdinalIgnoreCase)
+                && t.Status is RecordingStatus.InProgress or RecordingStatus.New
+                && t.StartDate < createdUtc.AddMinutes(-2) && t.EndDate > now.AddMinutes(2))
+            .ToList();
+        if (running.Count == 0)
+        {
+            return;
+        }
+
+        Dictionary<string, List<Airing>>? byShow = null;
+        foreach (var t in running)
+        {
+            if (!Guid.TryParse(t.ProgramId, out var programId) || _libraryManager.GetItemById(programId) is not LiveTvProgram program
+                || !ConflictPlanner.IsEpisodeId(program.ShowId))
+            {
+                _logger.LogInformation("{Name}: already on when the series recording was set up, no episode id to find another airing; recording the rest", t.Name);
+                continue;
+            }
+
+            byShow ??= AiringsByShow(now.AddMinutes(5), now.AddDays(14));
+            var later = byShow.TryGetValue(program.ShowId!, out var list)
+                ? list.FirstOrDefault(a => a.ProgramId != programId && a.Start > now.AddMinutes(5))
+                : null;
+            var title = string.IsNullOrWhiteSpace(program.EpisodeTitle) ? t.Name : t.Name + " - " + _marks.StripMarks(program.EpisodeTitle);
+            if (later is null)
+            {
+                _logger.LogInformation("{Title}: already on when the series recording was set up and not shown again; recording the rest", title);
+                continue;
+            }
+
+            var record = new ActionRecord
+            {
+                Time = DateTime.UtcNow,
+                Title = title,
+                Start = t.StartDate,
+                Channel = t.ChannelName ?? string.Empty,
+                Action = "moved (already on when the series recording was set up)",
+                MovedTo = $"{later.ChannelName} {later.Start:u}",
+                ProgramId = programId,
+                SeriesTimerId = t.SeriesTimerId
+            };
+            try
+            {
+                var laterScheduled = timers.Any(x => Guid.TryParse(x.ProgramId, out var p) && p == later.ProgramId
+                    && x.Status is RecordingStatus.New or RecordingStatus.InProgress);
+                if (!laterScheduled)
+                {
+                    await CreateTimerAsync(later.ProgramId, t.PrePaddingSeconds, t.PostPaddingSeconds, ct).ConfigureAwait(false);
+                }
+
+                await LiveTv.CancelTimer(t.Id).ConfigureAwait(false);
+                // Jellyfin 12 keeps a cancelled series episode's start timer running unless updated.
+                await LiveTv.UpdateTimer(t, ct).ConfigureAwait(false);
+                _store.SetOutcome(new OutcomeStore.Outcome
+                {
+                    ProgramId = programId,
+                    ShowId = program.ShowId,
+                    Title = title,
+                    ChannelName = t.ChannelName ?? string.Empty,
+                    Start = t.StartDate,
+                    End = t.EndDate,
+                    Kind = OutcomeStore.KindMoved,
+                    Detail = "Recording another airing: " + later.ChannelName + " " + LocalTime(later.Start) + " (it was already on when the series recording was set up)",
+                    RecordedInstead = later.ProgramId,
+                    SeriesTimerId = t.SeriesTimerId,
+                    PrePaddingSeconds = t.PrePaddingSeconds,
+                    PostPaddingSeconds = t.PostPaddingSeconds,
+                    Time = DateTime.UtcNow
+                });
+                record.Ok = true;
+                _logger.LogInformation("{Title} was already on when the series recording was set up: recording it at {Channel} {Start:u} instead", title, later.ChannelName, later.Start);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                record.Error = ex.Message;
+                _logger.LogWarning(ex, "Could not move {Title} to a later airing", title);
+            }
+
+            Remember(record);
+        }
     }
 
     // Future airings per show id (the same episode shown again), not already being recorded.

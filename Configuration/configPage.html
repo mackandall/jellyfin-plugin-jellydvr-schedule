@@ -99,6 +99,9 @@
                         <label><input is="emby-checkbox" type="checkbox" id="DsMove" /><span>Move to another airing of the same episode when one fits</span></label>
                     </div>
                     <div class="checkboxContainer">
+                        <label><input is="emby-checkbox" type="checkbox" id="DsMoveRunning" /><span>New series recording: record an episode that's already on at a later airing instead of part-way through (when it's shown again)</span></label>
+                    </div>
+                    <div class="checkboxContainer">
                         <label><input is="emby-checkbox" type="checkbox" id="DsRestore" /><span>Put a skipped recording back when it fits again (another recording was cancelled or moved)</span></label>
                     </div>
                     <div class="checkboxContainer">
@@ -342,6 +345,7 @@
                     page.querySelector("#DsMove").checked = c.MoveToOtherAiring !== false;
                     page.querySelector("#DsOnce").checked = c.RecordEachEpisodeOnce !== false;
                     page.querySelector("#DsRestore").checked = c.RestoreSkipped !== false;
+                    page.querySelector("#DsMoveRunning").checked = c.MoveRunningEpisode !== false;
                     favourites = (c.Favourites || []).map(function (f) { return Object.assign({}, f); });
                     renderFavourites();
                     page.querySelector("#DsViewerPolicy").value = c.LiveViewerPolicy || "warn";
@@ -389,6 +393,7 @@
                     c.MoveToOtherAiring = page.querySelector("#DsMove").checked;
                     c.RecordEachEpisodeOnce = page.querySelector("#DsOnce").checked;
                     c.RestoreSkipped = page.querySelector("#DsRestore").checked;
+                    c.MoveRunningEpisode = page.querySelector("#DsMoveRunning").checked;
                     c.Favourites = favourites.filter(function (f) { return (f.Title || "").trim(); }).map(function (f) {
                         return { Id: f.Id || newId(), Title: f.Title.trim(), Match: f.Match || "title", Channels: f.Channels || "", NewOnly: !!f.NewOnly,
                             Type: f.Type || "any", SkipInLibrary: f.SkipInLibrary !== false, Enabled: f.Enabled !== false };
