@@ -260,6 +260,34 @@ public sealed class ScheduleManager : BackgroundService
         LastFavourites = hits;
     }
 
+    /// <summary>Cancels the not-yet-started recordings a (removed) favourite scheduled; returns how many.</summary>
+    public async Task<int> CancelFavouriteRecordingsAsync(string ruleId, CancellationToken ct)
+    {
+        var programs = _favourites.ProgramsOf(ruleId).ToHashSet();
+        var cancelled = 0;
+        if (programs.Count > 0)
+        {
+            var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+            foreach (var t in timers.Where(t => t.Status == RecordingStatus.New && string.IsNullOrEmpty(t.SeriesTimerId)
+                && Guid.TryParse(t.ProgramId, out var p) && programs.Contains(p)))
+            {
+                try
+                {
+                    await LiveTv.CancelTimer(t.Id).ConfigureAwait(false);
+                    cancelled++;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "Could not cancel {Name}", t.Name);
+                }
+            }
+        }
+
+        _favourites.ForgetRule(ruleId);
+        _logger.LogInformation("Favourite {Rule} removed; {Count} upcoming recording(s) cancelled", ruleId, cancelled);
+        return cancelled;
+    }
+
     /// <summary>What the favourites (or one rule being edited) would match now, without scheduling anything.</summary>
     public async Task<List<FavouriteHit>> PreviewFavouritesAsync(IEnumerable<FavouriteRule> rules, CancellationToken ct)
     {

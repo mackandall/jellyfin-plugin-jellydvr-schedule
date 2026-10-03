@@ -165,6 +165,27 @@ public sealed class Favourites
         }
     }
 
+    /// <summary>Programmes a rule scheduled (to cancel their recordings when the rule is removed).</summary>
+    public IReadOnlyList<Guid> ProgramsOf(string ruleId)
+    {
+        lock (_lock)
+        {
+            return _created.Where(c => c.RuleId == ruleId).Select(c => c.ProgramId).ToList();
+        }
+    }
+
+    /// <summary>Forgets what a removed rule scheduled.</summary>
+    public void ForgetRule(string ruleId)
+    {
+        lock (_lock)
+        {
+            if (_created.RemoveAll(c => c.RuleId == ruleId) > 0)
+            {
+                Save();
+            }
+        }
+    }
+
     public void Remember(FavouriteHit hit)
     {
         lock (_lock)

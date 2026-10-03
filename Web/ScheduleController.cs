@@ -125,11 +125,83 @@ public sealed class ScheduleController : ControllerBase
     public IActionResult Program([FromRoute] Guid programId)
     {
         var o = _store.GetOutcome(programId);
+        var rule = _libraryManager.GetItemById(programId) is LiveTvProgram program ? FavouriteFor(program) : null;
         return Ok(new
         {
             Outcome = o is null ? null : new { o.Kind, o.Detail, o.RecordedInstead },
-            Pinned = _store.IsPinned(programId)
+            Pinned = _store.IsPinned(programId),
+            // The favourite that covers this show, if any (title, type and channels; "new only" ignored,
+            // so a repeat still shows its show is a favourite).
+            Favourite = rule is null ? null : new { rule.Id, rule.Title, rule.Match }
         });
+    }
+
+    private Configuration.FavouriteRule? FavouriteFor(LiveTvProgram program)
+    {
+        var channel = _libraryManager.GetItemById(program.ChannelId) as LiveTvChannel;
+        return (Plugin.Instance?.Configuration.Favourites ?? Array.Empty<Configuration.FavouriteRule>())
+            .FirstOrDefault(r => r.Enabled && FavouriteMatcher.Matches(r, program.Name, program.IsMovie, false, channel?.Number, channel?.Name));
+    }
+
+    /// <summary>
+    /// "Add to favourites" from the guide: an exact-title favourite for this show (any channel; shows
+    /// or movies to match it; skips episodes already in the library). Its upcoming airings are
+    /// scheduled right after (in the background; the guide shows them as they're created).
+    /// </summary>
+    [HttpPost("Favourites/FromProgram/{programId}")]
+    [Authorize(Policy = Policies.LiveTvManagement)]
+    public IActionResult AddFavouriteFromProgram([FromRoute] Guid programId)
+    {
+        if (_libraryManager.GetItemById(programId) is not LiveTvProgram program || Plugin.Instance is not { } plugin)
+        {
+            return NotFound();
+        }
+
+        if (FavouriteFor(program) is { } existing)
+        {
+            return Ok(new { existing.Id, existing.Title, Added = false, Message = "Already a favourite: " + existing.Title });
+        }
+
+        var rule = new Configuration.FavouriteRule
+        {
+            Title = program.Name,
+            Match = Configuration.FavouriteRule.MatchTitle,
+            Type = program.IsMovie ? Configuration.FavouriteRule.TypeMovies : Configuration.FavouriteRule.TypeSeries,
+            SkipInLibrary = true,
+            Enabled = true
+        };
+        var cfg = plugin.Configuration;
+        cfg.Favourites = (cfg.Favourites ?? Array.Empty<Configuration.FavouriteRule>()).Append(rule).ToArray();
+        plugin.SaveConfiguration();
+        _ = Task.Run(() => _manager.RunAsync("favourite added", CancellationToken.None));
+        return Ok(new { rule.Id, rule.Title, Added = true, Message = "Added to favourites: " + rule.Title + ". Upcoming airings are being scheduled." });
+    }
+
+    /// <summary>
+    /// Removes a favourite and cancels the recordings it scheduled that haven't started (like cancelling
+    /// a series recording). Recordings in progress and finished ones stay.
+    /// </summary>
+    [HttpDelete("Favourites/{ruleId}")]
+    [Authorize(Policy = Policies.LiveTvManagement)]
+    public async Task<IActionResult> RemoveFavourite([FromRoute] string ruleId, CancellationToken cancellationToken)
+    {
+        if (Plugin.Instance is not { } plugin)
+        {
+            return NotFound();
+        }
+
+        var cfg = plugin.Configuration;
+        var rule = (cfg.Favourites ?? Array.Empty<Configuration.FavouriteRule>()).FirstOrDefault(r => r.Id == ruleId);
+        if (rule is null)
+        {
+            return NotFound();
+        }
+
+        cfg.Favourites = cfg.Favourites.Where(r => r.Id != ruleId).ToArray();
+        cfg.SeriesPriority = (cfg.SeriesPriority ?? Array.Empty<string>()).Where(k => k != ScheduleManager.FavouriteKey(ruleId)).ToArray();
+        plugin.SaveConfiguration();
+        var cancelled = await _manager.CancelFavouriteRecordingsAsync(ruleId, cancellationToken).ConfigureAwait(false);
+        return Ok(new { Removed = true, Cancelled = cancelled, Message = "Removed from favourites: " + rule.Title + (cancelled > 0 ? " (" + cancelled + " upcoming recording(s) cancelled)" : string.Empty) });
     }
 
     /// <summary>
