@@ -88,8 +88,9 @@ public sealed class FavouritesController : ControllerBase
     /// <summary>Adds a favourite (title required); its upcoming airings get scheduled right after.</summary>
     [HttpPost]
     [Authorize(Policy = Policies.LiveTvManagement)]
-    public IActionResult Add([FromBody] FavouriteInput input)
+    public async Task<IActionResult> Add()
     {
+        var input = await ReadInputAsync().ConfigureAwait(false);
         if (Plugin.Instance is not { } plugin)
         {
             return NotFound();
@@ -111,8 +112,9 @@ public sealed class FavouritesController : ControllerBase
     /// <summary>Changes a favourite (only the fields sent). Switched off, it keeps what's scheduled.</summary>
     [HttpPost("{ruleId}")]
     [Authorize(Policy = Policies.LiveTvManagement)]
-    public IActionResult Update([FromRoute] string ruleId, [FromBody] FavouriteInput input)
+    public async Task<IActionResult> Update([FromRoute] string ruleId)
     {
+        var input = await ReadInputAsync().ConfigureAwait(false);
         if (Plugin.Instance is not { } plugin)
         {
             return NotFound();
@@ -133,6 +135,23 @@ public sealed class FavouritesController : ControllerBase
         plugin.SaveConfiguration();
         RunSoon("favourite changed");
         return Ok(new { rule.Id, Message = "Saved: " + rule.Title });
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions InputJson = new() { PropertyNameCaseInsensitive = true };
+
+    // The body is read as JSON whatever Content-Type the client sent: the Jellyfin SDK (Wholphin)
+    // labels a string body text/plain, which [FromBody] refuses with 415.
+    private async Task<FavouriteInput> ReadInputAsync()
+    {
+        try
+        {
+            return await System.Text.Json.JsonSerializer.DeserializeAsync<FavouriteInput>(Request.Body, InputJson).ConfigureAwait(false)
+                ?? new FavouriteInput();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return new FavouriteInput();
+        }
     }
 
     private static FavouriteRule Apply(FavouriteRule rule, FavouriteInput input)
