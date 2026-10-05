@@ -142,6 +142,25 @@
                     <div id="DsViewers" class="fieldDescription" style="white-space:pre-line;"></div>
                 </div>
 
+                <div class="verticalSection">
+                    <h2>Recordings that don't start</h2>
+                    <div class="fieldDescription" style="margin-bottom:.6em;">
+                        Jellyfin opens live streams one at a time, so a tuner that connects but never sends anything
+                        holds up every recording and live channel, with nothing in the guide to show it.
+                    </div>
+                    <div class="checkboxContainer">
+                        <label><input is="emby-checkbox" type="checkbox" id="DsStuckAlert" /><span>Alert when a recording hasn't started</span></label>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="DsStuckSeconds">Seconds after its start before alerting</label>
+                        <input id="DsStuckSeconds" type="number" min="30" max="1800" is="emby-input" />
+                    </div>
+                    <div class="checkboxContainer">
+                        <label><input is="emby-checkbox" type="checkbox" id="DsStuckOnScreen" /><span>Show the alert on screen to admins using Jellyfin (it always goes in the activity log)</span></label>
+                    </div>
+                    <div id="DsNotStarted" class="fieldDescription" style="white-space:pre-line;"></div>
+                </div>
+
                 <div>
                     <button is="emby-button" type="submit" class="raised button-submit block emby-button">
                         <span>Save</span>
@@ -276,6 +295,8 @@
                 renderOutcomes(s.Outcomes || [], s.Pins || []);
                 page.querySelector("#DsViewers").textContent = "Watching live TV now: " + ((s.Viewers || []).join("; ") || "nobody") +
                     ((s.ViewerActions || []).length ? "\n" + s.ViewerActions.slice(0, 10).join("\n") : "");
+                page.querySelector("#DsNotStarted").textContent = (s.NotStarted || []).length
+                    ? s.NotStarted.slice(0, 10).join("\n") : "No recording has failed to start since Jellyfin started.";
                 page.querySelector("#DsRecent").textContent = (s.Recent || []).length
                     ? s.Recent.slice(0, 30).map(function (r) {
                         return new Date(r.Time).toLocaleString() + " · " + (r.Ok ? "" : "FAILED ") + r.Action + " " + r.Title + " (" + when(r.Start) + ", " + r.Channel + ")" +
@@ -351,6 +372,9 @@
                     page.querySelector("#DsViewerPolicy").value = c.LiveViewerPolicy || "warn";
                     page.querySelector("#DsWarnMinutes").value = c.WarnMinutes == null ? 2 : c.WarnMinutes;
                     page.querySelector("#DsStartLate").checked = c.StartLateWhenFree !== false;
+                    page.querySelector("#DsStuckAlert").checked = c.StuckRecordingAlert !== false;
+                    page.querySelector("#DsStuckSeconds").value = c.StuckRecordingSeconds == null ? 90 : c.StuckRecordingSeconds;
+                    page.querySelector("#DsStuckOnScreen").checked = c.StuckRecordingOnScreen !== false;
                     page.querySelector("#DsKeep").value = c.KeepCopy || "earliest";
                     Dashboard.hideLoadingMsg();
                 });
@@ -402,6 +426,10 @@
                     var wm = parseInt(page.querySelector("#DsWarnMinutes").value, 10);
                     c.WarnMinutes = isNaN(wm) ? 2 : wm;
                     c.StartLateWhenFree = page.querySelector("#DsStartLate").checked;
+                    c.StuckRecordingAlert = page.querySelector("#DsStuckAlert").checked;
+                    var ss = parseInt(page.querySelector("#DsStuckSeconds").value, 10);
+                    c.StuckRecordingSeconds = isNaN(ss) ? 90 : ss;
+                    c.StuckRecordingOnScreen = page.querySelector("#DsStuckOnScreen").checked;
                     c.KeepCopy = page.querySelector("#DsKeep").value;
                     c.SeriesPriority = series.map(function (s) { return s.Id; });
                     ApiClient.updatePluginConfiguration(pluginUniqueId, c).then(function (result) {

@@ -24,11 +24,13 @@ public sealed class ScheduleController : ControllerBase
     private readonly OutcomeStore _store;
     private readonly ILibraryManager _libraryManager;
     private readonly LiveViewerGuard _guard;
+    private readonly RecordingStartWatchdog _watchdog;
     private readonly LiveViewers _viewers;
 
-    public ScheduleController(ScheduleManager manager, OutcomeStore store, ILibraryManager libraryManager, LiveViewerGuard guard, LiveViewers viewers)
+    public ScheduleController(ScheduleManager manager, OutcomeStore store, ILibraryManager libraryManager, LiveViewerGuard guard, LiveViewers viewers, RecordingStartWatchdog watchdog)
     {
         _guard = guard;
+        _watchdog = watchdog;
         _viewers = viewers;
         _manager = manager;
         _store = store;
@@ -45,7 +47,8 @@ public sealed class ScheduleController : ControllerBase
         Pins = _store.Pins,
         Favourites = _manager.LastFavourites.Select(FavouriteDto),
         Viewers = _viewers.Current().Select(v => v.Describe() + (string.IsNullOrEmpty(v.User) ? string.Empty : " (" + v.User + ")")),
-        ViewerActions = _guard.Recent.ToList()
+        ViewerActions = _guard.Recent.ToList(),
+        NotStarted = _watchdog.Recent.ToList()
     });
 
     [HttpPost("Run")]

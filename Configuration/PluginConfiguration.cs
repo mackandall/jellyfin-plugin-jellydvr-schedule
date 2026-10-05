@@ -57,6 +57,19 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool StartLateWhenFree { get; set; } = true;
 
     /// <summary>
+    /// Alert the admins (on screen and in the activity log) when a recording hasn't started some time
+    /// after it should have. Jellyfin opens live streams one at a time, so one tuner that never answers
+    /// silently blocks every recording.
+    /// </summary>
+    public bool StuckRecordingAlert { get; set; } = true;
+
+    /// <summary>How long after its start (with padding) a recording counts as not started (seconds).</summary>
+    public int StuckRecordingSeconds { get; set; } = 90;
+
+    /// <summary>Show the alert on the screens of admins using Jellyfin, besides the activity log.</summary>
+    public bool StuckRecordingOnScreen { get; set; } = true;
+
+    /// <summary>
     /// A new series recording whose episode is already on (Jellyfin starts recording it at once,
     /// part-way through): record that episode at a later airing instead, when there is one.
     /// </summary>
