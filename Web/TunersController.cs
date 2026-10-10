@@ -31,9 +31,11 @@ public sealed class TunersController : ControllerBase
     private readonly IApplicationPaths _paths;
     private readonly LiveViewers _viewers;
     private readonly ActiveRecordings _active;
+    private readonly IConfigurationManager _config;
 
-    public TunersController(IServiceProvider serviceProvider, ILibraryManager libraryManager, IApplicationPaths paths, LiveViewers viewers, ActiveRecordings active)
+    public TunersController(IServiceProvider serviceProvider, ILibraryManager libraryManager, IApplicationPaths paths, LiveViewers viewers, ActiveRecordings active, IConfigurationManager config)
     {
+        _config = config;
         _active = active;
         _serviceProvider = serviceProvider;
         _libraryManager = libraryManager;
@@ -47,7 +49,10 @@ public sealed class TunersController : ControllerBase
     public IActionResult Tuners([FromQuery] Guid? channelId)
     {
         // Answered while a client waits to start a channel: no ILiveTvManager.GetTimers (seconds).
-        var capacity = Plugin.Instance?.Configuration.TunerInputs ?? 0;
+        // Tuner inputs if set, else Jellyfin's tuner count (as the schedule itself does): a fresh
+        // install leaves it at 0, which read as "no limit" and so never as full.
+        var inputs = Plugin.Instance?.Configuration.TunerInputs ?? 0;
+        var capacity = inputs > 0 ? inputs : Schedule.ScheduleManager.JellyfinTunerCount(_config);
         var buffers = LiveBufferTimerIds();
         var timers = _active.Current();
 

@@ -314,7 +314,7 @@ public sealed class ScheduleManager : BackgroundService
         var horizon = now.AddDays(Math.Clamp(cfg.LookAheadDays, 1, 14));
         _store.Prune(now);
         var pinned = _store.Pins.Select(p => p.ProgramId).ToHashSet();
-        var capacity = cfg.TunerInputs > 0 ? cfg.TunerInputs : JellyfinTunerCount();
+        var capacity = cfg.TunerInputs > 0 ? cfg.TunerInputs : JellyfinTunerCount(_config);
         var plan = new SchedulePlan { CreatedUtc = now, Mode = cfg.Mode, Capacity = capacity };
 
         var seriesTimers = (await LiveTv.GetSeriesTimers(new SeriesTimerQuery(), ct).ConfigureAwait(false)).Items;
@@ -636,9 +636,13 @@ public sealed class ScheduleManager : BackgroundService
         return result;
     }
 
-    private int JellyfinTunerCount()
+    /// <summary>
+    /// Jellyfin's own tuner count (Live TV › tuner devices), for when Tuner inputs is left at 0:
+    /// their sum, or 0 (no limit known) when there are none or any of them is unlimited.
+    /// </summary>
+    internal static int JellyfinTunerCount(IConfigurationManager config)
     {
-        var hosts = _config.GetConfiguration<LiveTvOptions>("livetv").TunerHosts ?? Array.Empty<TunerHostInfo>();
+        var hosts = config.GetConfiguration<LiveTvOptions>("livetv").TunerHosts ?? Array.Empty<TunerHostInfo>();
         return hosts.Length == 0 || hosts.Any(h => h.TunerCount <= 0) ? 0 : hosts.Sum(h => h.TunerCount);
     }
 
