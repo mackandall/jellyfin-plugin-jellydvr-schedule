@@ -161,6 +161,33 @@
                     <div id="DsNotStarted" class="fieldDescription" style="white-space:pre-line;"></div>
                 </div>
 
+                <div class="verticalSection">
+                    <h2>Recordings that stall</h2>
+                    <div class="fieldDescription" style="margin-bottom:1em;">
+                        A tuner can go quiet in the middle of a recording. Jellyfin doesn't notice: it keeps the recording
+                        open to the end and writes nothing more, so the file is short with nothing to show why.
+                    </div>
+                    <div class="checkboxContainer">
+                        <label><input is="emby-checkbox" type="checkbox" id="DsStallWatch" /><span>Watch recordings for a stall and alert (on screen as above, and in the activity log)</span></label>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="DsStallSeconds">Seconds without new data before a recording counts as stalled</label>
+                        <input id="DsStallSeconds" type="number" min="30" max="900" is="emby-input" />
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label><input is="emby-checkbox" type="checkbox" id="DsStallRetune" /><span>Tune a stalled recording again</span></label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            The stalled recording is stopped and the rest of the programme is recorded as a second file.
+                            Off: only the alert.
+                        </div>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="DsStallMax">Most times one programme is tuned again</label>
+                        <input id="DsStallMax" type="number" min="1" max="10" is="emby-input" />
+                    </div>
+                    <div id="DsStalled" class="fieldDescription" style="white-space:pre-line;"></div>
+                </div>
+
                 <div>
                     <button is="emby-button" type="submit" class="raised button-submit block emby-button">
                         <span>Save</span>
@@ -297,6 +324,8 @@
                     ((s.ViewerActions || []).length ? "\n" + s.ViewerActions.slice(0, 10).join("\n") : "");
                 page.querySelector("#DsNotStarted").textContent = (s.NotStarted || []).length
                     ? s.NotStarted.slice(0, 10).join("\n") : "No recording has failed to start since Jellyfin started.";
+                page.querySelector("#DsStalled").textContent = (s.Stalled || []).length
+                    ? s.Stalled.slice(0, 10).join("\n") : "No recording has stalled since Jellyfin started.";
                 page.querySelector("#DsRecent").textContent = (s.Recent || []).length
                     ? s.Recent.slice(0, 30).map(function (r) {
                         return new Date(r.Time).toLocaleString() + " · " + (r.Ok ? "" : "FAILED ") + r.Action + " " + r.Title + " (" + when(r.Start) + ", " + r.Channel + ")" +
@@ -375,6 +404,10 @@
                     page.querySelector("#DsStuckAlert").checked = c.StuckRecordingAlert !== false;
                     page.querySelector("#DsStuckSeconds").value = c.StuckRecordingSeconds == null ? 90 : c.StuckRecordingSeconds;
                     page.querySelector("#DsStuckOnScreen").checked = c.StuckRecordingOnScreen !== false;
+                    page.querySelector("#DsStallWatch").checked = c.StallWatch !== false;
+                    page.querySelector("#DsStallSeconds").value = c.StallSeconds == null ? 90 : c.StallSeconds;
+                    page.querySelector("#DsStallRetune").checked = c.StallRetune !== false;
+                    page.querySelector("#DsStallMax").value = c.StallMaxRetunes == null ? 3 : c.StallMaxRetunes;
                     page.querySelector("#DsKeep").value = c.KeepCopy || "earliest";
                     Dashboard.hideLoadingMsg();
                 });
@@ -430,6 +463,12 @@
                     var ss = parseInt(page.querySelector("#DsStuckSeconds").value, 10);
                     c.StuckRecordingSeconds = isNaN(ss) ? 90 : ss;
                     c.StuckRecordingOnScreen = page.querySelector("#DsStuckOnScreen").checked;
+                    c.StallWatch = page.querySelector("#DsStallWatch").checked;
+                    var st = parseInt(page.querySelector("#DsStallSeconds").value, 10);
+                    c.StallSeconds = isNaN(st) ? 90 : st;
+                    c.StallRetune = page.querySelector("#DsStallRetune").checked;
+                    var sm = parseInt(page.querySelector("#DsStallMax").value, 10);
+                    c.StallMaxRetunes = isNaN(sm) ? 3 : sm;
                     c.KeepCopy = page.querySelector("#DsKeep").value;
                     c.SeriesPriority = series.map(function (s) { return s.Id; });
                     ApiClient.updatePluginConfiguration(pluginUniqueId, c).then(function (result) {

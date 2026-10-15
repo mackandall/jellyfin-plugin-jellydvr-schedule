@@ -409,7 +409,9 @@ public sealed class ScheduleManager : BackgroundService
             o.ChannelName,
             program.StartDate - before,
             program.EndDate.Value + after,
-            RankFor(o.SeriesTimerId, pinned.Contains(o.ProgramId), cfg, seriesRank, _favourites.RuleByProgram().TryGetValue(o.ProgramId, out var fav) ? fav : null),
+            IsRerecord(o.ProgramId) && !pinned.Contains(o.ProgramId)
+                ? RerecordRank
+                : RankFor(o.SeriesTimerId, pinned.Contains(o.ProgramId), cfg, seriesRank, _favourites.RuleByProgram().TryGetValue(o.ProgramId, out var fav) ? fav : null),
             false,
             program.ShowId,
             o.ProgramId,
@@ -426,7 +428,7 @@ public sealed class ScheduleManager : BackgroundService
     {
         var program = Guid.TryParse(t.ProgramId, out var pid) ? _libraryManager.GetItemById(pid) as LiveTvProgram : null;
         var favourite = string.IsNullOrEmpty(t.SeriesTimerId) && _favourites.RuleByProgram().TryGetValue(pid, out var fav) ? fav : null;
-        var rank = RankFor(t.SeriesTimerId, pinned.Contains(pid), cfg, seriesRank, favourite);
+        var rank = IsRerecord(pid) && !pinned.Contains(pid) ? RerecordRank : RankFor(t.SeriesTimerId, pinned.Contains(pid), cfg, seriesRank, favourite);
         var title = string.IsNullOrWhiteSpace(program?.EpisodeTitle) ? t.Name : t.Name + " - " + program!.EpisodeTitle;
         var before = TimeSpan.FromSeconds(Math.Max(0, t.PrePaddingSeconds));
         var after = TimeSpan.FromSeconds(Math.Max(0, t.PostPaddingSeconds));
@@ -609,8 +611,50 @@ public sealed class ScheduleManager : BackgroundService
 
     public static string FavouriteKey(string ruleId) => "fav:" + ruleId;
 
+    // Below every series recording, favourite and one-off: a second try never takes an input from a first recording.
+    private const int RerecordRank = 0;
+    private HashSet<Guid> _rerecords = new();
+    private DateTime _rerecordsAt = DateTime.MinValue;
+
+    /// <summary>
+    /// Whether a guide entry is set to record only to replace an incomplete recording: Episode
+    /// History scheduled it (read from its shared file; no code dependency).
+    /// </summary>
+    private bool IsRerecord(Guid programId)
+    {
+        if (DateTime.UtcNow - _rerecordsAt > TimeSpan.FromSeconds(30))
+        {
+            _rerecordsAt = DateTime.UtcNow;
+            var result = new HashSet<Guid>();
+            try
+            {
+                var file = Path.Combine(_paths.DataPath, "episode-history", "programmes.json");
+                if (File.Exists(file))
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(file));
+                    foreach (var p in doc.RootElement.EnumerateObject().Select(x => x.Value))
+                    {
+                        if (p.TryGetProperty("State", out var state) && state.GetString() == "scheduled"
+                            && p.TryGetProperty("NextIsOurs", out var ours) && ours.ValueKind == JsonValueKind.True
+                            && p.TryGetProperty("NextProgramId", out var id) && Guid.TryParse(id.GetString(), out var guid))
+                        {
+                            result.Add(guid);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
+            {
+            }
+
+            _rerecords = result;
+        }
+
+        return _rerecords.Contains(programId);
+    }
+
     // JellyDVR Live's buffer timers (read from its shared file; no code dependency).
-    private HashSet<string> LiveBufferTimerIds()
+    internal HashSet<string> LiveBufferTimerIds()
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         try

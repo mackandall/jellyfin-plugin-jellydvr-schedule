@@ -70,6 +70,25 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool StuckRecordingOnScreen { get; set; } = true;
 
     /// <summary>
+    /// Watch recordings in progress for a stall: the file stops growing because the tuner went quiet
+    /// (seen 2026-10-13: the capture stopped mid-film and Jellyfin went on "recording" nothing to
+    /// the end). The admins are told, as for a recording that didn't start.
+    /// </summary>
+    public bool StallWatch { get; set; } = true;
+
+    /// <summary>How long a recording's file may go without growing before it counts as stalled (seconds).</summary>
+    public int StallSeconds { get; set; } = 90;
+
+    /// <summary>
+    /// Tune a stalled recording again: it is stopped and the rest of the programme is recorded as
+    /// a new file, so a stall costs a minute or two and not the rest of the programme.
+    /// </summary>
+    public bool StallRetune { get; set; } = true;
+
+    /// <summary>Most times one programme's recording is tuned again after stalling.</summary>
+    public int StallMaxRetunes { get; set; } = 3;
+
+    /// <summary>
     /// A new series recording whose episode is already on (Jellyfin starts recording it at once,
     /// part-way through): record that episode at a later airing instead, when there is one.
     /// </summary>

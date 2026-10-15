@@ -156,12 +156,12 @@ public sealed class RecordingStartWatchdog : BackgroundService
 
     private static string Key(TimerInfoDto t, DateTime start) => t.Id + "|" + start.Ticks.ToString(CultureInfo.InvariantCulture);
 
-    private async Task LogActivityAsync(string name, string overview)
+    internal async Task LogActivityAsync(string name, string overview, string type = "JellyDvrScheduleRecordingNotStarted")
     {
         try
         {
             var activity = _serviceProvider.GetRequiredService<IActivityManager>();
-            await activity.CreateAsync(new ActivityLog(name, "JellyDvrScheduleRecordingNotStarted", Guid.Empty)
+            await activity.CreateAsync(new ActivityLog(name, type, Guid.Empty)
             {
                 Overview = overview,
                 ShortOverview = "JellyDVR Schedule",
@@ -174,7 +174,7 @@ public sealed class RecordingStartWatchdog : BackgroundService
         }
     }
 
-    private async Task TellAdminsAsync(string text, CancellationToken ct)
+    internal async Task TellAdminsAsync(string text, CancellationToken ct, string header = "Recording didn't start")
     {
         var cutoff = DateTime.UtcNow.AddMinutes(-15);
         var sessions = _sessionManager.Sessions
@@ -188,7 +188,7 @@ public sealed class RecordingStartWatchdog : BackgroundService
                 await _sessionManager.SendMessageCommand(
                     null!,
                     s.Id,
-                    new MessageCommand { Header = "Recording didn't start", Text = text, TimeoutMs = 60000 },
+                    new MessageCommand { Header = header, Text = text, TimeoutMs = 60000 },
                     ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
