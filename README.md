@@ -34,6 +34,16 @@ XMLTV Guide Cleaner.
 
 ## Install
 
+### From the JellyDVR plugin repository (no build needed)
+
+1. Dashboard → Plugins → **Repositories** → add (one list for all the JellyDVR plugins):
+   ```
+   https://raw.githubusercontent.com/mackandall/jdvr-client/main/plugins/manifest.json
+   ```
+2. Dashboard → Plugins → **Catalog** → **JellyDVR Schedule** → Install, then restart Jellyfin.
+
+### Or build from source
+
 ```
 dotnet build -c Release
 sudo ./install.sh   # restarts Jellyfin
