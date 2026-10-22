@@ -38,3 +38,10 @@ XMLTV Guide Cleaner.
 dotnet build -c Release
 sudo ./install.sh   # restarts Jellyfin
 ```
+
+## License
+
+GPL-2.0-or-later: you can redistribute and change it under the terms of the GNU General Public
+License, version 2 or (at your option) any later version. See [LICENSE](LICENSE).
+
+The official source and releases are at <https://github.com/mackandall/jellyfin-plugin-jellydvr-schedule>.
