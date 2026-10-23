@@ -228,7 +228,7 @@
                     '<label><input type="checkbox" data-f="Enabled" /> Enabled</label>' +
                     '<span style="flex:1;"></span>' +
                     '<button is="emby-button" type="button" class="raised emby-button" data-a="preview" style="padding:.2em .8em;">Preview</button>' +
-                    '<button is="emby-button" type="button" class="emby-button" data-a="remove" style="padding:.2em .8em;">Remove</button>' +
+                    '<button is="emby-button" type="button" class="raised emby-button" data-a="remove" style="padding:.2em .8em;">Remove</button>' +
                     '</div>' +
                     '<div data-preview class="fieldDescription" style="margin-top:.4em;"></div>';
                 row.querySelectorAll("[data-f]").forEach(function (el) {
@@ -280,8 +280,8 @@
                     row.style.cssText = "display:flex;gap:.5em;align-items:center;margin-bottom:.3em;";
                     row.innerHTML = '<span style="width:2em;opacity:.7;">' + (i + 1) + '.</span>' +
                         '<span style="flex:1;">' + esc(s.Name) + ' <span style="opacity:.6;">· ' + esc(s.Channel) + '</span></span>' +
-                        '<button is="emby-button" type="button" class="emby-button" data-a="up" title="Higher">▲</button>' +
-                        '<button is="emby-button" type="button" class="emby-button" data-a="down" title="Lower">▼</button>';
+                        '<button is="emby-button" type="button" class="raised emby-button" data-a="up" title="Higher">▲</button>' +
+                        '<button is="emby-button" type="button" class="raised emby-button" data-a="down" title="Lower">▼</button>';
                     row.querySelectorAll("[data-a]").forEach(function (b) {
                         b.addEventListener("click", function () {
                             var a = b.getAttribute("data-a");
