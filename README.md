@@ -32,6 +32,26 @@ XMLTV Guide Cleaner.
 - **Move to another airing of the same episode when one fits** (on).
 - **Series priority** — reorder with ▲ ▼.
 
+## Screenshots
+
+From a real server (Jellyfin 12.2). Dashboard → Plugins → JellyDVR Schedule: conflicts, and airings taken off
+the schedule (here duplicates of an episode already recorded at another airing), each with **Record this
+instead**:
+
+![Conflicts and not being recorded](docs/screenshots/conflicts.jpg)
+
+Series priority:
+
+![Series priority](docs/screenshots/priority.jpg)
+
+Settings:
+
+![Settings](docs/screenshots/settings.jpg)
+
+What happens when live TV holds every tuner a recording needs, and the alert for recordings that don't start:
+
+![Live TV and recordings](docs/screenshots/live-tv.jpg)
+
 ## Install
 
 ### From the JellyDVR plugin repository (no build needed)
