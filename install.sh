@@ -4,9 +4,9 @@ set -euxo pipefail
 SRC="$(dirname "$(readlink -f "$0")")/bin/Release/net10.0"
 PLUGINS=/var/lib/jellyfin/plugins
 # The folder Jellyfin loads: the one with this plugin's DLL and the highest version in its
-# name (a catalog install makes "<Name>_<version>"); JellyDVR Schedule_1.0.1.0 when there's none yet.
+# name (a catalog install makes "<Name>_<version>"); JellyDVR Schedule_1.0.2.0 when there's none yet.
 DEST=$(ls -d "$PLUGINS"/*/Jellyfin.Plugin.DvrSchedule.dll 2>/dev/null | xargs -r -d '\n' -n1 dirname | sort -t_ -k2 -V | tail -1 || true)
-DEST=${DEST:-$PLUGINS/JellyDVR Schedule_1.0.1.0}
+DEST=${DEST:-$PLUGINS/JellyDVR Schedule_1.0.2.0}
 # Stop first: overwriting the DLL under a running server makes it fail on shutdown
 # ("Bad IL range") because the runtime still reads code from the replaced file.
 systemctl stop jellyfin
