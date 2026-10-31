@@ -30,6 +30,11 @@ public sealed class ScheduleManager : BackgroundService
 {
     private static readonly TimeSpan EventDelay = TimeSpan.FromSeconds(30);
 
+    // A guide refresh rewrites the guide entries without Episode History's marks, which it puts
+    // back shortly after the refresh (or after startup, when a refresh may have been cut short).
+    // Until then a favourite set to skip episodes in the library can't tell what's in it.
+    private static readonly TimeSpan MarksSettle = TimeSpan.FromMinutes(3);
+
     /// <summary>How far ahead live viewers count as holding their inputs ("never interrupt viewers").</summary>
     public static readonly TimeSpan ViewerHold = TimeSpan.FromMinutes(5);
 
@@ -47,6 +52,8 @@ public sealed class ScheduleManager : BackgroundService
     private readonly Favourites _favourites;
     private readonly ITaskManager _taskManager;
     private Timer? _afterGuide;
+    private DateTime _startedUtc = DateTime.UtcNow;
+    private DateTime _guideRefreshedUtc = DateTime.MinValue;
     private readonly SemaphoreSlim _runLock = new(1, 1);
     private readonly ConcurrentQueue<ActionRecord> _recent = new();
     private Timer? _soon;
@@ -92,6 +99,7 @@ public sealed class ScheduleManager : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _stopping = stoppingToken;
+        _startedUtc = DateTime.UtcNow;
         _soon = new Timer(_ => _ = RunSafeAsync("recordings changed"), null, Timeout.Infinite, Timeout.Infinite);
         // After "Refresh Guide": new airings for the favourites. Waits a few minutes so Episode
         // History has re-marked the guide (its in-library marks decide what favourites skip).
@@ -129,7 +137,8 @@ public sealed class ScheduleManager : BackgroundService
     {
         if (e.Task.ScheduledTask.Key == "RefreshGuide")
         {
-            _afterGuide?.Change(TimeSpan.FromMinutes(3), Timeout.InfiniteTimeSpan);
+            _guideRefreshedUtc = DateTime.UtcNow;
+            _afterGuide?.Change(MarksSettle + TimeSpan.FromSeconds(10), Timeout.InfiniteTimeSpan);
         }
     }
 
@@ -240,8 +249,17 @@ public sealed class ScheduleManager : BackgroundService
 
         var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
         var hits = _favourites.Find(rules, timers);
+        var settling = MarksSettling();
+        var skipInLibrary = rules.Where(r => r.SkipInLibrary).Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        var held = 0;
         foreach (var hit in hits.Where(h => h.Status == FavouriteHit.WillRecord))
         {
+            if (settling && skipInLibrary.Contains(hit.RuleId))
+            {
+                held++;
+                continue;
+            }
+
             ct.ThrowIfCancellationRequested();
             var record = new ActionRecord
             {
@@ -268,7 +286,22 @@ public sealed class ScheduleManager : BackgroundService
             Remember(record);
         }
 
+        if (held > 0)
+        {
+            _logger.LogInformation("Favourites: {Count} airing(s) wait until Episode History has marked the guide again", held);
+            _afterGuide?.Change(MarksSettle + TimeSpan.FromSeconds(10), Timeout.InfiniteTimeSpan);
+        }
+
         LastFavourites = hits;
+    }
+
+    // While a guide refresh runs, and for a while after one ends or after startup.
+    private bool MarksSettling()
+    {
+        var now = DateTime.UtcNow;
+        return now - _startedUtc < MarksSettle
+            || now - _guideRefreshedUtc < MarksSettle
+            || _taskManager.ScheduledTasks.Any(t => t.ScheduledTask.Key == "RefreshGuide" && t.State != TaskState.Idle);
     }
 
     /// <summary>Cancels the not-yet-started recordings a (removed) favourite scheduled; returns how many.</summary>
