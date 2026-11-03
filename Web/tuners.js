@@ -353,6 +353,11 @@
     s.defer = true;
     s.src = '/JellyDvrSchedule/web/favourites.js';
     document.head.appendChild(s);
+    // Recording rules (series recordings + favourites) on Live TV > Series.
+    var r = document.createElement('script');
+    r.defer = true;
+    r.src = '/JellyDvrSchedule/web/rules.js';
+    document.head.appendChild(r);
   })();
 
   log('tuners script loaded');

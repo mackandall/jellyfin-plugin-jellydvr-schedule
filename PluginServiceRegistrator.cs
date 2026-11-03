@@ -14,6 +14,8 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
         serviceCollection.AddSingleton<OutcomeStore>();
+        serviceCollection.AddSingleton<PauseStore>();
+        serviceCollection.AddSingleton<RuleBoard>();
         serviceCollection.AddSingleton<GuideMarks>();
         serviceCollection.AddSingleton<ActiveRecordings>();
         serviceCollection.AddSingleton<Favourites>();

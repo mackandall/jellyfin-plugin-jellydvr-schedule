@@ -61,6 +61,7 @@ public sealed class FavouritesController : ControllerBase
                     r.Type,
                     r.SkipInLibrary,
                     r.Enabled,
+                    r.OffUntil,
                     Upcoming = upcoming.Count,
                     Next = upcoming.Take(NextShown).Select(h => new { h.ProgramId, h.Title, h.Channel, h.Start })
                 };
@@ -83,6 +84,9 @@ public sealed class FavouritesController : ControllerBase
         public bool? SkipInLibrary { get; set; }
 
         public bool? Enabled { get; set; }
+
+        /// <summary>With Enabled false: ISO time to switch on again by itself; empty: until switched on.</summary>
+        public string? OffUntil { get; set; }
     }
 
     /// <summary>Adds a favourite (title required); its upcoming airings get scheduled right after.</summary>
@@ -109,7 +113,10 @@ public sealed class FavouritesController : ControllerBase
         return Ok(new { rule.Id, Message = "Added to favourites: " + rule.Title + ". Upcoming airings are being scheduled." });
     }
 
-    /// <summary>Changes a favourite (only the fields sent). Switched off, it keeps what's scheduled.</summary>
+    /// <summary>
+    /// Changes a favourite (only the fields sent). Switched off, its recordings that haven't started are
+    /// cancelled (only those before OffUntil, when sent) and scheduled again when it's on.
+    /// </summary>
     [HttpPost("{ruleId}")]
     [Authorize(Policy = Policies.LiveTvManagement)]
     public async Task<IActionResult> Update([FromRoute] string ruleId)
@@ -131,13 +138,25 @@ public sealed class FavouritesController : ControllerBase
             return BadRequest("A title or keyword is needed.");
         }
 
+        if (input.Enabled == false && !WebInput.TryFuture(input.OffUntil, out _))
+        {
+            return BadRequest("OffUntil must be a future date and time.");
+        }
+
+        var wasOn = rule.Enabled;
         Apply(rule, input);
         plugin.SaveConfiguration();
         RunSoon("favourite changed");
-        return Ok(new { rule.Id, Message = "Saved: " + rule.Title });
+        var message = input.Enabled switch
+        {
+            false => "Switched off: " + rule.Title + (rule.OffUntil is { } u ? " until " + ScheduleManager.LocalDate(u) : string.Empty)
+                + ". Its upcoming recordings are being cancelled.",
+            true when !wasOn => "Switched on: " + rule.Title + ". Upcoming airings are being scheduled.",
+            _ => "Saved: " + rule.Title
+        };
+        return Ok(new { rule.Id, Message = message });
     }
 
-    private static readonly System.Text.Json.JsonSerializerOptions InputJson = new() { PropertyNameCaseInsensitive = true };
 
     // The body is read as JSON whatever Content-Type the client sent: the Jellyfin SDK (Wholphin)
     // labels a string body text/plain, which [FromBody] refuses with 415.
@@ -145,7 +164,7 @@ public sealed class FavouritesController : ControllerBase
     {
         try
         {
-            return await System.Text.Json.JsonSerializer.DeserializeAsync<FavouriteInput>(Request.Body, InputJson).ConfigureAwait(false)
+            return await System.Text.Json.JsonSerializer.DeserializeAsync<FavouriteInput>(Request.Body, WebInput.Json).ConfigureAwait(false)
                 ?? new FavouriteInput();
         }
         catch (System.Text.Json.JsonException)
@@ -178,7 +197,12 @@ public sealed class FavouritesController : ControllerBase
 
         rule.NewOnly = input.NewOnly ?? rule.NewOnly;
         rule.SkipInLibrary = input.SkipInLibrary ?? rule.SkipInLibrary;
-        rule.Enabled = input.Enabled ?? rule.Enabled;
+        if (input.Enabled is { } enabled)
+        {
+            rule.Enabled = enabled;
+            rule.OffUntil = !enabled && WebInput.TryFuture(input.OffUntil, out var until) ? until : null;
+        }
+
         return rule;
     }
 

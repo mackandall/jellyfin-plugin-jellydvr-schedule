@@ -137,4 +137,25 @@ public class FavouriteRule
     public bool SkipInLibrary { get; set; } = true;
 
     public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Switched off until this time (UTC), then on again by itself; airings from then on are still
+    /// scheduled meanwhile. Null with <see cref="Enabled"/> off: off until switched on.
+    /// </summary>
+    public DateTime? OffUntil
+    {
+        get => _offUntil;
+        // Kept in UTC: the settings file's XML reader hands back local times, and DateTime compares
+        // ignore the kind.
+        set => _offUntil = value is not { } v ? null
+            : v.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(v, DateTimeKind.Utc) : v.ToUniversalTime();
+    }
+
+    private DateTime? _offUntil;
+
+    /// <summary>Whether an airing starting at <paramref name="startUtc"/> is recorded under this rule.</summary>
+    public bool ActiveFor(DateTime startUtc) => Enabled || (OffUntil is { } until && startUtc >= until);
+
+    /// <summary>On, or off only for a while (it still schedules what airs after that).</summary>
+    public bool IsScheduling() => Enabled || OffUntil.HasValue;
 }

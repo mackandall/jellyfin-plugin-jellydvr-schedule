@@ -57,6 +57,11 @@ public static class FavouriteMatcher
         return string.Join(' ', words);
     }
 
+    /// <summary>Whether a normalized title is the wanted one (exact), or has it as whole words (keyword).</summary>
+    public static bool TitleMatches(string wanted, string name, bool keyword) => keyword
+        ? (" " + name + " ").Contains(" " + wanted + " ", StringComparison.Ordinal)
+        : name == wanted;
+
     /// <summary>Whether a guide airing satisfies the rule's title, type, channel and new-only conditions.</summary>
     public static bool Matches(FavouriteRule rule, string? title, bool isMovie, bool isRepeat, string? channelNumber, string? channelName)
     {
@@ -67,10 +72,7 @@ public static class FavouriteMatcher
             return false;
         }
 
-        var titleOk = rule.Match == FavouriteRule.MatchKeyword
-            ? (" " + name + " ").Contains(" " + wanted + " ", StringComparison.Ordinal)
-            : name == wanted;
-        if (!titleOk)
+        if (!TitleMatches(wanted, name, rule.Match == FavouriteRule.MatchKeyword))
         {
             return false;
         }
@@ -196,6 +198,23 @@ public sealed class Favourites
         }
     }
 
+    /// <summary>
+    /// Forgets that a favourite scheduled these airings (their recordings were cancelled because the
+    /// favourite was switched off), so switching it on schedules them again rather than treating
+    /// them as cancelled by hand.
+    /// </summary>
+    public void ForgetPrograms(IEnumerable<Guid> programIds)
+    {
+        var ids = programIds.ToHashSet();
+        lock (_lock)
+        {
+            if (_created.RemoveAll(c => ids.Contains(c.ProgramId)) > 0)
+            {
+                Save();
+            }
+        }
+    }
+
     public void Remember(FavouriteHit hit)
     {
         lock (_lock)
@@ -214,7 +233,7 @@ public sealed class Favourites
     {
         var now = DateTime.UtcNow;
         Prune(now);
-        var active = rules.Where(r => r.Enabled && !string.IsNullOrWhiteSpace(r.Title)).ToList();
+        var active = rules.Where(r => r.IsScheduling() && !string.IsNullOrWhiteSpace(r.Title)).ToList();
         if (active.Count == 0)
         {
             return new List<FavouriteHit>();
@@ -248,6 +267,11 @@ public sealed class Favourites
             var matches = programs
                 .Where(p =>
                 {
+                    if (!rule.ActiveFor(p.StartDate))
+                    {
+                        return false; // switched off for a while: only what airs after that
+                    }
+
                     var ch = Channel(p.ChannelId);
                     return FavouriteMatcher.Matches(rule, p.Name, p.IsMovie, p.IsRepeat, ch?.Number, ch?.Name);
                 })

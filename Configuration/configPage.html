@@ -453,7 +453,8 @@
                     c.MoveRunningEpisode = page.querySelector("#DsMoveRunning").checked;
                     c.Favourites = favourites.filter(function (f) { return (f.Title || "").trim(); }).map(function (f) {
                         return { Id: f.Id || newId(), Title: f.Title.trim(), Match: f.Match || "title", Channels: f.Channels || "", NewOnly: !!f.NewOnly,
-                            Type: f.Type || "any", SkipInLibrary: f.SkipInLibrary !== false, Enabled: f.Enabled !== false };
+                            Type: f.Type || "any", SkipInLibrary: f.SkipInLibrary !== false, Enabled: f.Enabled !== false,
+                            OffUntil: f.Enabled !== false ? null : (f.OffUntil || null) };
                     });
                     c.LiveViewerPolicy = page.querySelector("#DsViewerPolicy").value;
                     var wm = parseInt(page.querySelector("#DsWarnMinutes").value, 10);

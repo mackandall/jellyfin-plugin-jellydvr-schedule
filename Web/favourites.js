@@ -1,12 +1,13 @@
 /*
- * JellyDVR Schedule — Favourites list in jellyfin-web, at the top of Live TV > Series (next to the
- * series recordings) and of Jellyfin's own Favorites page, for everyone allowed to manage recordings: each favourite with its next
+ * JellyDVR Schedule — Favourites list in jellyfin-web, at the top of Jellyfin's own Favorites page
+ * (Live TV > Series has the Recording rules list instead, rules.js), for everyone allowed to manage recordings: each favourite with its next
  * recordings, and add / edit / switch off / remove. Admins also have the plugin's settings page
  * (priority order, preview).
  *
  * Loaded by tuners.js (itself loaded by Episode History's guidemenu.js, already in index.html).
- * VERSION-SENSITIVE: jellyfin-web 12.0.0 draws Live TV with React: `#/livetv?tab=5` is Series,
- * inside `div#liveTvPage`. React may redraw the page, so the section is re-added when missing.
+ * VERSION-SENSITIVE: jellyfin-web 12 draws Live TV with React: `#/livetv?tab=4` is Schedule (its
+ * list view is drawn here too), inside `div#liveTvPage`. React may redraw the page, so the section is
+ * re-added when missing.
  */
 (function () {
   'use strict';
@@ -17,10 +18,10 @@
   window.__jdvrFavourites = true;
 
   var SECTION_ID = 'jdvrFavouritesSection';
-  var SERIES_TAB = '5';
   var data = null;
   var loadedAt = 0;
   var editing = null; // rule id being edited, 'new' for the add form, or null
+  var choosing = null; // 'fav:<id>' while picking how long to switch off / pause
 
   function log(msg) {
     if (window.console && window.console.debug) {
@@ -63,10 +64,7 @@
    * since that's where people look for their favourites. The hearted items stay below it there.
    */
   function hostElement() {
-    if (tabOf('#/livetv') === SERIES_TAB) {
-      var page = document.querySelector('#liveTvPage');
-      return page && (page.querySelector('.padded-bottom-page') || page);
-    }
+    // Live TV > Series shows the Recording rules list (rules.js), favourites included.
     if (tabOf('#/home') === '1') {
       return document.querySelector('#indexPage:not(.hide) .tabContent[data-index="1"]');
     }
@@ -115,6 +113,56 @@
       parts.push('skips ones in the library');
     }
     return parts.join(' · ');
+  }
+
+  function day(iso) {
+    return new Date(iso).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  // Local midnight `days` from today, as ISO (UTC).
+  function daysAhead(days) {
+    var d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + days);
+    return d.toISOString();
+  }
+
+  /*
+   * How long to switch a favourite off: until switched on by hand, a week, two, four, or a date.
+   * onPick gets an ISO time (or null for "until I switch it on").
+   */
+  function chooser(onPick) {
+    var box = document.createElement('div');
+    box.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:.4em;margin:.4em 0 0 1.8em;';
+    var lead = document.createElement('span');
+    lead.style.cssText = 'opacity:.8;margin-right:.3em;';
+    lead.textContent = 'For how long?';
+    box.appendChild(lead);
+    box.appendChild(button('Until I switch it on', true, function () { onPick(null); }));
+    [[7, '1 week'], [14, '2 weeks'], [28, '4 weeks']].forEach(function (c) {
+      box.appendChild(button(c[1], false, function () { onPick(daysAhead(c[0])); }));
+    });
+    var date = document.createElement('input');
+    date.type = 'date';
+    date.style.cssText = FIELD + 'padding:.3em .45em;';
+    var tomorrow = new Date(Date.now() + 86400000);
+    date.min = tomorrow.getFullYear() + '-' + String(tomorrow.getMonth() + 1).padStart(2, '0') + '-' + String(tomorrow.getDate()).padStart(2, '0');
+    box.appendChild(date);
+    box.appendChild(button('Until this date', false, function () {
+      if (!date.value) {
+        date.focus();
+        return;
+      }
+      var parts = date.value.split('-');
+      var d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+      if (d.getTime() <= Date.now()) {
+        status('Pick a date after today.');
+        return;
+      }
+      onPick(d.toISOString());
+    }));
+    box.appendChild(button('Cancel', false, function () { choosing = null; render(); }));
+    return box;
   }
 
   function form(f, onDone) {
@@ -170,12 +218,21 @@
     top.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:.6em;';
     top.innerHTML = '<span style="color:#f5c518;font-size:1.2em;">★</span>' +
       '<span style="font-weight:600;font-size:1.1em;">' + esc(f.Title) + '</span>' +
-      (f.Enabled ? '' : '<span style="font-size:.85em;border:1px solid currentColor;border-radius:.3em;padding:0 .35em;">Off</span>') +
+      (f.Enabled ? '' : '<span style="font-size:.85em;border:1px solid currentColor;border-radius:.3em;padding:0 .35em;">'
+        + (f.OffUntil ? 'Off until ' + esc(day(f.OffUntil)) : 'Off') + '</span>') +
       '<span style="flex:1;"></span>';
     if (canManage) {
       top.appendChild(button(f.Enabled ? 'Switch off' : 'Switch on', false, function () {
-        api('POST', 'JellyDvrSchedule/Favourites/' + f.Id, { Enabled: !f.Enabled }).then(function (r) { status(r && r.Message); reloadSoon(); });
+        if (f.Enabled) {
+          choosing = 'fav:' + f.Id;
+          render();
+          return;
+        }
+        api('POST', 'JellyDvrSchedule/Favourites/' + f.Id, { Enabled: true }).then(function (r) { status(r && r.Message); reloadSoon(); });
       }));
+      if (!f.Enabled) {
+        top.appendChild(button('Change', false, function () { choosing = 'fav:' + f.Id; render(); }));
+      }
       top.appendChild(button('Edit', false, function () { editing = f.Id; render(); }));
       var armed = false;
       var remove = button('Remove', false, function () {
@@ -191,6 +248,15 @@
       top.appendChild(remove);
     }
     el.appendChild(top);
+    if (choosing === 'fav:' + f.Id) {
+      el.style.opacity = '';
+      el.appendChild(chooser(function (until) {
+        choosing = null;
+        render();
+        api('POST', 'JellyDvrSchedule/Favourites/' + f.Id, { Enabled: false, OffUntil: until || '' })
+          .then(function (r) { status(r && r.Message); reloadSoon(); }, function () { status('Could not switch it off.'); });
+      }));
+    }
     var sub = document.createElement('div');
     sub.style.cssText = 'opacity:.7;font-size:.9em;margin:.15em 0 .3em 1.8em;';
     sub.textContent = describe(f);
@@ -198,7 +264,9 @@
     var next = document.createElement('div');
     next.style.cssText = 'font-size:.92em;margin-left:1.8em;';
     if (!f.Enabled) {
-      next.textContent = 'Switched off: records nothing new (already scheduled recordings stay).';
+      next.textContent = f.OffUntil
+        ? 'Switched off until ' + day(f.OffUntil) + ': nothing before then records; it switches back on by itself.'
+        : 'Switched off: records nothing until switched on (its upcoming recordings were cancelled).';
     } else if (!f.Next.length) {
       next.textContent = 'Nothing scheduled: not in the guide right now (it will be recorded when it appears).';
     } else {

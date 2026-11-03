@@ -113,6 +113,12 @@ public sealed class TunersController : ControllerBase
     [Produces("application/javascript")]
     public Task<ContentResult> FavouritesScript() => Embedded("favourites.js");
 
+    /// <summary>Recording rules on Live TV > Series; tuners.js loads it.</summary>
+    [HttpGet("web/rules.js")]
+    [AllowAnonymous]
+    [Produces("application/javascript")]
+    public Task<ContentResult> RulesScript() => Embedded("rules.js");
+
     private async Task<ContentResult> Embedded(string name)
     {
         var assembly = typeof(TunersController).Assembly;
