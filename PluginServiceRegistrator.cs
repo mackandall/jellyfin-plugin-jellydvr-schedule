@@ -1,3 +1,4 @@
+using Jellyfin.Plugin.DvrSchedule.Alerts;
 using Jellyfin.Plugin.DvrSchedule.Schedule;
 using Jellyfin.Plugin.DvrSchedule.Web;
 using MediaBrowser.Controller;
@@ -13,6 +14,10 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
 {
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
+        serviceCollection.AddSingleton<AlertSenders>();
+        serviceCollection.AddSingleton<AlertCenter>();
+        serviceCollection.AddSingleton<AlertService>();
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<AlertService>());
         serviceCollection.AddSingleton<OutcomeStore>();
         serviceCollection.AddSingleton<PauseStore>();
         serviceCollection.AddSingleton<RuleBoard>();

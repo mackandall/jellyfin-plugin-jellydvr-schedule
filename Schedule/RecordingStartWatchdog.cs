@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Jellyfin.Data;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Database.Implementations.Enums;
+using Jellyfin.Plugin.DvrSchedule.Alerts;
 using Jellyfin.Plugin.DvrSchedule.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
@@ -37,6 +38,7 @@ public sealed class RecordingStartWatchdog : BackgroundService
     private readonly ISessionManager _sessionManager;
     private readonly IUserManager _userManager;
     private readonly IRecordingsManager _recordings;
+    private readonly AlertCenter _center;
 
     // Timer id + start → when it was reported (forgotten after a day).
     private readonly Dictionary<string, (DateTime Reported, string Title)> _reported = new(StringComparer.Ordinal);
@@ -46,8 +48,10 @@ public sealed class RecordingStartWatchdog : BackgroundService
         IServiceProvider serviceProvider,
         ISessionManager sessionManager,
         IUserManager userManager,
-        IRecordingsManager recordings)
+        IRecordingsManager recordings,
+        AlertCenter center)
     {
+        _center = center;
         _logger = logger;
         _serviceProvider = serviceProvider;
         _sessionManager = sessionManager;
@@ -104,6 +108,11 @@ public sealed class RecordingStartWatchdog : BackgroundService
             foreach (var key in _reported.Keys.Where(k => k.StartsWith(t.Id + "|", StringComparison.Ordinal)).ToList())
             {
                 Note($"{_reported[key].Title} started recording after all, {(now - _reported[key].Reported).TotalMinutes:0} min after the alert");
+                await _center.ResolveAsync(
+                    "start:" + key,
+                    $"{_reported[key].Title} started recording after all, {(now - _reported[key].Reported).TotalMinutes:0} min late.",
+                    true,
+                    ct).ConfigureAwait(false);
                 _reported.Remove(key);
             }
         }
@@ -124,9 +133,17 @@ public sealed class RecordingStartWatchdog : BackgroundService
             _reported[Key(timer, start)] = (now, timer.Name);
         }
 
-        foreach (var key in _reported.Where(kv => now - kv.Value.Reported > TimeSpan.FromDays(1)).Select(kv => kv.Key).ToList())
+        // One that never started and whose programme is over: Episode History reports it as failed,
+        // so this one just closes.
+        var waiting = stuck.Select(x => Key(x.Timer, x.Start)).ToHashSet(StringComparer.Ordinal);
+        foreach (var key in _reported.Keys.Where(k => !waiting.Contains(k)).ToList())
         {
-            _reported.Remove(key);
+            await _center.ResolveAsync("start:" + key, "No longer waiting: the programme is over or the recording was cancelled.", false, ct)
+                .ConfigureAwait(false);
+            if (now - _reported[key].Reported > TimeSpan.FromDays(1))
+            {
+                _reported.Remove(key);
+            }
         }
 
         if (fresh.Count == 0)
@@ -144,6 +161,27 @@ public sealed class RecordingStartWatchdog : BackgroundService
             + ". Jellyfin is probably waiting on a tuner that isn't answering, and that blocks every recording and live channel."
             + " Restarting the stuck tuner app (e.g. BroadcastHub) usually frees it.";
         Note((fresh.Count == 1 ? "Didn't start: " : "Didn't start (" + fresh.Count + "): ") + titles);
+        foreach (var (timer, start) in fresh)
+        {
+            var channel = string.IsNullOrEmpty(timer.ChannelName) ? null : timer.ChannelName;
+            await _center.RaiseAsync(
+                new AlertReport
+                {
+                    Kind = AlertKinds.Tuner,
+                    Key = "start:" + Key(timer, start),
+                    Title = timer.Name + " hasn't started recording",
+                    Text = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "It was due at {0:h:mm tt}{1}. Jellyfin is probably waiting on a tuner that isn't answering, and that blocks every recording and live channel. Restarting the stuck tuner app (e.g. BroadcastHub) usually frees it.",
+                        start.ToLocalTime(),
+                        channel is null ? string.Empty : " on " + channel),
+                    Where = channel,
+                    AiredUtc = timer.StartDate,
+                    ProgramId = Guid.TryParse(timer.ProgramId, out var pid) ? pid : null
+                },
+                ct).ConfigureAwait(false);
+        }
+
         _logger.LogWarning("Recording start watchdog: {Text}", text);
 
         await LogActivityAsync(fresh.Count == 1 ? "Recording didn't start: " + fresh[0].Timer.Name : fresh.Count + " recordings didn't start", text)

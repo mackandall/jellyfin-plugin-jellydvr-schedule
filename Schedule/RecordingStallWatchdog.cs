@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.DvrSchedule.Alerts;
 using Jellyfin.Plugin.DvrSchedule.Configuration;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Model.LiveTv;
@@ -35,6 +36,7 @@ public sealed class RecordingStallWatchdog : BackgroundService
     private readonly ActiveRecordings _active;
     private readonly ScheduleManager _manager;
     private readonly RecordingStartWatchdog _alerts;
+    private readonly AlertCenter _center;
 
     // By the DVR's timer id: the file's size when it last grew.
     private readonly Dictionary<string, Watch> _watched = new(StringComparer.Ordinal);
@@ -49,8 +51,10 @@ public sealed class RecordingStallWatchdog : BackgroundService
         IRecordingsManager recordings,
         ActiveRecordings active,
         ScheduleManager manager,
-        RecordingStartWatchdog alerts)
+        RecordingStartWatchdog alerts,
+        AlertCenter center)
     {
+        _center = center;
         _logger = logger;
         _serviceProvider = serviceProvider;
         _recordings = recordings;
@@ -121,6 +125,12 @@ public sealed class RecordingStallWatchdog : BackgroundService
 
         foreach (var gone in _watched.Keys.Where(id => active.All(r => r.TimerId != id)).ToList())
         {
+            // A stall that lasted to the end: Episode History reports the short recording, so this closes.
+            if (_watched[gone].Handled)
+            {
+                await _center.ResolveAsync("stall:" + gone, "The recording ended.", false, ct).ConfigureAwait(false);
+            }
+
             _watched.Remove(gone);
         }
 
@@ -143,6 +153,11 @@ public sealed class RecordingStallWatchdog : BackgroundService
                 if (watch.Handled)
                 {
                     Note($"{rec.Name} is receiving data again");
+                    await _center.ResolveAsync(
+                        "stall:" + rec.TimerId,
+                        $"{rec.Name} is receiving data again ({DateTime.Now.ToString("h:mm tt", CultureInfo.InvariantCulture)}).",
+                        true,
+                        ct).ConfigureAwait(false);
                 }
 
                 watch.Length = length;
@@ -179,6 +194,16 @@ public sealed class RecordingStallWatchdog : BackgroundService
         var text = "The recording of " + what + ": the tuner went quiet. " + outcome;
         Note(what + ". " + outcome);
         _logger.LogWarning("Recording stall watchdog: {Text}", text);
+        await _center.RaiseAsync(
+            new AlertReport
+            {
+                Kind = AlertKinds.Short,
+                Key = "stall:" + rec.TimerId,
+                Title = rec.Name + ": picture stopped",
+                Text = "The tuner went quiet at " + since + ", so the recording stopped getting picture.",
+                Next = outcome
+            },
+            ct).ConfigureAwait(false);
         await _alerts.LogActivityAsync("Recording stalled: " + rec.Name, text, "JellyDvrScheduleRecordingStalled").ConfigureAwait(false);
         if (cfg.StuckRecordingOnScreen)
         {

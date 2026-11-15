@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Configuration\configPage.html" />
+    <EmbeddedResource Include="Configuration\alertsPage.html" />
     <EmbeddedResource Include="Web\tuners.js" />
     <EmbeddedResource Include="Web\favourites.js" />
     <EmbeddedResource Include="Web\rules.js" />

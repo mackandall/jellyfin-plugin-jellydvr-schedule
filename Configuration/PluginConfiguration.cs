@@ -94,6 +94,66 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool MoveRunningEpisode { get; set; } = true;
 
+    // ---- Alerts (Alerts/AlertCenter.cs; the "JellyDVR Alerts" page) --------------------------
+
+    /// <summary>Where each kind of problem is sent; kinds missing here use <see cref="AlertRoute.Default"/>.</summary>
+    public AlertRoute[] AlertRoutes { get; set; } = Array.Empty<AlertRoute>();
+
+    /// <summary>ntfy server (https://ntfy.sh or your own).</summary>
+    public string NtfyServer { get; set; } = "https://ntfy.sh";
+
+    /// <summary>ntfy topic; empty = phone alerts off.</summary>
+    public string NtfyTopic { get; set; } = string.Empty;
+
+    /// <summary>Access token for a ntfy server that needs one (optional).</summary>
+    public string NtfyToken { get; set; } = string.Empty;
+
+    /// <summary>Email address alerts go to; empty = email off.</summary>
+    public string EmailTo { get; set; } = string.Empty;
+
+    public string EmailFrom { get; set; } = string.Empty;
+
+    public string SmtpHost { get; set; } = string.Empty;
+
+    public int SmtpPort { get; set; } = 587;
+
+    public bool SmtpSsl { get; set; } = true;
+
+    public string SmtpUser { get; set; } = string.Empty;
+
+    public string SmtpPassword { get; set; } = string.Empty;
+
+    /// <summary>JDVR: a popup listing new problems when the app opens.</summary>
+    public bool TvPopupOnOpen { get; set; } = true;
+
+    /// <summary>JDVR: a Problems tile on Home while any problem is open.</summary>
+    public bool TvProblemsTile { get; set; } = true;
+
+    /// <summary>JDVR: a popup during playback too (failed recordings only).</summary>
+    public bool TvPopupDuringPlayback { get; set; }
+
+    /// <summary>Phone alerts arrive silently between <see cref="QuietFrom"/> and <see cref="QuietTo"/> (local time).</summary>
+    public bool QuietHours { get; set; } = true;
+
+    public string QuietFrom { get; set; } = "23:00";
+
+    public string QuietTo { get; set; } = "07:00";
+
+    /// <summary>A failed recording still makes a sound in quiet hours.</summary>
+    public bool FailedLoudInQuiet { get; set; } = true;
+
+    /// <summary>Send a message when a problem clears by itself.</summary>
+    public bool TellWhenFixed { get; set; } = true;
+
+    /// <summary>Remind about a problem still open after this many hours (0 = never).</summary>
+    public int RemindHours { get; set; } = 12;
+
+    /// <summary>Warn when a recordings drive has less free space than this (GB).</summary>
+    public int DiskFreeWarnGb { get; set; } = 50;
+
+    /// <summary>Warn when the guide hasn't been refreshed for this many hours.</summary>
+    public int GuideStaleHours { get; set; } = 24;
+
     /// <summary>Title/keyword recording rules, independent of guide ids.</summary>
     public FavouriteRule[] Favourites { get; set; } = Array.Empty<FavouriteRule>();
 
@@ -101,6 +161,27 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Series recordings (series timer ids) and favourites ("fav:" + rule id), highest priority first.
     /// </summary>
     public string[] SeriesPriority { get; set; } = Array.Empty<string>();
+}
+
+/// <summary>Where one kind of problem is sent.</summary>
+public class AlertRoute
+{
+    public string Kind { get; set; } = string.Empty;
+
+    public bool Tv { get; set; }
+
+    public bool Phone { get; set; }
+
+    public bool Email { get; set; }
+
+    /// <summary>The page's starting choice for a kind.</summary>
+    public static AlertRoute Default(string kind) => new()
+    {
+        Kind = kind,
+        Tv = kind != Alerts.AlertKinds.Guide,
+        Phone = true,
+        Email = false
+    };
 }
 
 /// <summary>

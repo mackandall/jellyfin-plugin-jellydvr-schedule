@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>JellyDVR Alerts</title>
+</head>
+<body>
+<div id="DvrAlertsPage"
+     data-role="page"
+     class="page type-interior pluginConfigurationPage"
+     data-require="emby-input,emby-button,emby-checkbox,emby-select">
+    <style>
+        #DvrAlertsPage [hidden] { display: none !important; }
+        #DvrAlertsPage .da-header { display: flex; align-items: center; gap: .7em; flex-wrap: wrap; margin-bottom: .8em; }
+        #DvrAlertsPage .da-header h1 { margin: 0; font-size: 1.9em; font-weight: 700; }
+        #DvrAlertsPage .da-badge { font-size: .8em; padding: .3em .8em; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); }
+        #DvrAlertsPage .da-badge.da-on { color: #22c55e; border-color: rgba(34,197,94,.45); }
+        #DvrAlertsPage .da-badge.da-warn { color: #f5b544; border-color: rgba(245,181,68,.45); }
+        #DvrAlertsPage .da-jump { display: flex; gap: .5em; flex-wrap: wrap; padding: .7em 0; margin-bottom: 1.6em; border-top: 1px solid rgba(255,255,255,.1); border-bottom: 1px solid rgba(255,255,255,.1); }
+        #DvrAlertsPage .da-jump button { margin: 0; font-size: .85em; padding: .4em .9em; border-radius: 999px; }
+        #DvrAlertsPage .da-section { margin-bottom: 2.4em; scroll-margin-top: 5em; }
+        #DvrAlertsPage .da-head { display: flex; align-items: center; gap: .8em; flex-wrap: wrap; border-bottom: 2px solid #00a4dc; padding-bottom: .45em; margin-bottom: .9em; }
+        #DvrAlertsPage .da-num { background: #00a4dc; color: #06121a; font-weight: 700; border-radius: 6px; width: 1.75em; height: 1.75em; display: flex; align-items: center; justify-content: center; flex: none; }
+        #DvrAlertsPage .da-head h2 { margin: 0; font-size: 1.5em; font-weight: 700; }
+        #DvrAlertsPage .da-sum { margin-left: auto; font-size: .9em; opacity: .75; }
+        #DvrAlertsPage .da-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(20em, 1fr)); gap: .8em 1.2em; }
+        #DvrAlertsPage .da-card { background: rgba(255,255,255,.05); border-radius: 8px; padding: .9em 1.1em; }
+        #DvrAlertsPage .da-card h3 { margin: 0 0 .6em; font-size: 1.1em; }
+        #DvrAlertsPage .da-row { display: flex; gap: .5em; align-items: center; flex-wrap: wrap; }
+        #DvrAlertsPage .da-row + .da-row { margin-top: .6em; }
+        #DvrAlertsPage .da-row button { margin: 0; }
+        #DvrAlertsPage .da-note { font-size: .88em; opacity: .75; }
+        #DvrAlertsPage .da-check { display: flex; align-items: center; gap: .5em; cursor: pointer; margin: .35em 0; }
+        #DvrAlertsPage .da-check input { width: 1.15em; height: 1.15em; accent-color: #00a4dc; margin: 0; flex: none; }
+        #DvrAlertsPage .da-small { width: 5em !important; display: inline-block; }
+        #DvrAlertsPage input.da-text { width: 100%; box-sizing: border-box; padding: .45em .6em; background: rgba(0,0,0,.25); color: inherit; border: 1px solid rgba(255,255,255,.18); border-radius: 6px; font: inherit; }
+        #DvrAlertsPage input.da-text.da-small { width: 5em !important; }
+        #DvrAlertsPage label.da-field { display: block; font-size: .85em; opacity: .85; margin-top: .6em; }
+        #DvrAlertsPage label.da-field input { margin-top: .25em; font-size: 1.15em; }
+        #DvrAlertsPage .da-scroll { overflow-x: auto; background: rgba(255,255,255,.05); border-radius: 8px; }
+        #DvrAlertsPage table { width: 100%; min-width: 36em; border-collapse: collapse; font-size: .92em; }
+        #DvrAlertsPage th { text-align: left; opacity: .7; padding: .6em .8em; font-weight: 600; }
+        #DvrAlertsPage td { padding: .6em .8em; border-top: 1px solid rgba(255,255,255,.08); vertical-align: top; }
+        #DvrAlertsPage td.da-c { width: 5em; }
+        #DvrAlertsPage .da-st-open { color: #ff8f86; font-weight: 600; }
+        #DvrAlertsPage .da-st-fixed { color: #7fd1a0; font-weight: 600; }
+        #DvrAlertsPage .da-st-dismissed { opacity: .7; }
+        #DvrAlertsPage .da-ok { color: #7fd1a0; }
+        #DvrAlertsPage .da-bad { color: #ff8f86; }
+        #DvrAlertsPage .da-save { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 1em; padding: .8em 0; margin-bottom: 2em; background: var(--jf-palette-background-default, #101010); border-top: 1px solid rgba(255,255,255,.12); }
+        #DvrAlertsPage .da-save button { margin: 0 0 0 auto; width: auto; min-width: 10em; }
+    </style>
+    <div data-role="content">
+        <div class="content-primary">
+            <form id="DaForm">
+            <div class="da-header">
+                <h1>JellyDVR Alerts</h1>
+                <span id="DaBadgePhone" class="da-badge">Phone</span>
+                <span id="DaBadgeEmail" class="da-badge">Email</span>
+                <span id="DaBadgeOpen" class="da-badge">Problems</span>
+                <a is="emby-linkbutton" class="button-link" style="margin-left:auto;" href="#/configurationpage?name=JellyDVR%20Schedule">← JellyDVR Schedule</a>
+            </div>
+            <nav class="da-jump" aria-label="Sections">
+                <button is="emby-button" type="button" class="raised" data-jump="DaSecWhat">1 What to tell you</button>
+                <button is="emby-button" type="button" class="raised" data-jump="DaSecWhere">2 Where to send</button>
+                <button is="emby-button" type="button" class="raised" data-jump="DaSecQuiet">3 Quiet hours</button>
+                <button is="emby-button" type="button" class="raised" data-jump="DaSecCheck">4 Recording checks</button>
+                <button is="emby-button" type="button" class="raised" data-jump="DaSecRecent">5 Recent problems</button>
+            </nav>
+
+            <section id="DaSecWhat" class="da-section">
+                <div class="da-head"><span class="da-num">1</span><h2>What to tell you</h2><span class="da-sum">TV = a popup in JDVR and its Problems list</span></div>
+                <div class="da-scroll">
+                    <table>
+                        <thead><tr><th>Problem</th><th>TV</th><th>Phone</th><th>Email</th></tr></thead>
+                        <tbody>
+                            <tr data-kind="failed">
+                                <td>Recording didn't record<div class="da-note">Nothing was recorded (seen by Episode History when the programme ends)</div></td>
+                                <td class="da-c"><input type="checkbox" data-to="Tv" aria-label="Failed recordings on the TV"></td>
+                                <td class="da-c"><input type="checkbox" data-to="Phone" aria-label="Failed recordings on the phone"></td>
+                                <td class="da-c"><input type="checkbox" data-to="Email" aria-label="Failed recordings by email"></td>
+                            </tr>
+                            <tr data-kind="short">
+                                <td>Recording short or picture stopped<div class="da-note">A stall while recording, or too short at the end (section 4)</div></td>
+                                <td class="da-c"><input type="checkbox" data-to="Tv" aria-label="Short recordings on the TV"></td>
+                                <td class="da-c"><input type="checkbox" data-to="Phone" aria-label="Short recordings on the phone"></td>
+                                <td class="da-c"><input type="checkbox" data-to="Email" aria-label="Short recordings by email"></td>
+                            </tr>
+                            <tr data-kind="tuner">
+                                <td>Recording hasn't started: tuner stuck<div class="da-note">One tuner that never answers holds up every recording</div></td>
+                                <td class="da-c"><input type="checkbox" data-to="Tv" aria-label="Stuck tuner on the TV"></td>
+                                <td class="da-c"><input type="checkbox" data-to="Phone" aria-label="Stuck tuner on the phone"></td>
+                                <td class="da-c"><input type="checkbox" data-to="Email" aria-label="Stuck tuner by email"></td>
+                            </tr>
+                            <tr data-kind="space">
+                                <td>Recordings drive nearly full<div class="da-note">Below <input id="DaDiskGb" class="da-text da-small" type="number" min="1" max="10000" aria-label="Free space warning in GB"> GB free</div></td>
+                                <td class="da-c"><input type="checkbox" data-to="Tv" aria-label="Drive space on the TV"></td>
+                                <td class="da-c"><input type="checkbox" data-to="Phone" aria-label="Drive space on the phone"></td>
+                                <td class="da-c"><input type="checkbox" data-to="Email" aria-label="Drive space by email"></td>
+                            </tr>
+                            <tr data-kind="guide">
+                                <td>Guide not updated<div class="da-note">No successful guide refresh for <input id="DaGuideHours" class="da-text da-small" type="number" min="1" max="720" aria-label="Guide age in hours"> hours</div></td>
+                                <td class="da-c"><input type="checkbox" data-to="Tv" aria-label="Guide problem on the TV"></td>
+                                <td class="da-c"><input type="checkbox" data-to="Phone" aria-label="Guide problem on the phone"></td>
+                                <td class="da-c"><input type="checkbox" data-to="Email" aria-label="Guide problem by email"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="DaSecWhere" class="da-section">
+                <div class="da-head"><span class="da-num">2</span><h2>Where to send</h2><span id="DaSumWhere" class="da-sum"></span></div>
+                <div class="da-grid">
+                    <div class="da-card">
+                        <h3>Phone (ntfy)</h3>
+                        <div class="da-note">Install the free ntfy app on your phone and subscribe to the topic below. Anyone who knows the topic can read it, so make it hard to guess.</div>
+                        <label class="da-field">Server<input id="DaNtfyServer" class="da-text" type="text" placeholder="https://ntfy.sh"></label>
+                        <label class="da-field">Topic (empty = phone alerts off)<input id="DaNtfyTopic" class="da-text" type="text" autocomplete="off"></label>
+                        <label class="da-field">Access token (only for a server that needs one)<input id="DaNtfyToken" class="da-text" type="password" autocomplete="off"></label>
+                        <div class="da-row" style="margin-top:.8em;">
+                            <button is="emby-button" type="button" id="DaTestPhone" class="raised emby-button"><span>Send a test</span></button>
+                            <span id="DaTestPhoneResult" class="da-note"></span>
+                        </div>
+                    </div>
+                    <div class="da-card">
+                        <h3>Email</h3>
+                        <label class="da-field">Send to (empty = email off)<input id="DaEmailTo" class="da-text" type="email" autocomplete="off"></label>
+                        <label class="da-field">Mail server<input id="DaSmtpHost" class="da-text" type="text" placeholder="smtp.gmail.com"></label>
+                        <div class="da-row">
+                            <label class="da-field" style="flex:none;">Port<input id="DaSmtpPort" class="da-text da-small" type="number" min="1" max="65535"></label>
+                            <label class="da-check" style="margin-top:1.4em;"><input type="checkbox" id="DaSmtpSsl"><span>Encrypted (STARTTLS)</span></label>
+                        </div>
+                        <label class="da-field">User name<input id="DaSmtpUser" class="da-text" type="text" autocomplete="off"></label>
+                        <label class="da-field">Password (Gmail: an app password)<input id="DaSmtpPassword" class="da-text" type="password" autocomplete="new-password"></label>
+                        <label class="da-field">From (empty = the user name)<input id="DaEmailFrom" class="da-text" type="text" autocomplete="off"></label>
+                        <div class="da-note" style="margin-top:.4em;">Port 587 with encryption works with most providers; port 465 isn't supported.</div>
+                        <div class="da-row" style="margin-top:.8em;">
+                            <button is="emby-button" type="button" id="DaTestEmail" class="raised emby-button"><span>Send a test</span></button>
+                            <span id="DaTestEmailResult" class="da-note"></span>
+                        </div>
+                    </div>
+                    <div class="da-card">
+                        <h3>TV (JDVR)</h3>
+                        <label class="da-check"><input type="checkbox" id="DaTvPopup"><span>Popup when the app opens, listing new problems</span></label>
+                        <label class="da-check"><input type="checkbox" id="DaTvTile"><span>Problems tile on Home while any are open</span></label>
+                        <label class="da-check"><input type="checkbox" id="DaTvPlayback"><span>Popup during playback (failed recordings only)</span></label>
+                        <div class="da-row" style="margin-top:.6em;">
+                            <button is="emby-button" type="button" id="DaTestTv" class="raised emby-button"><span>Show a test problem on the TVs</span></button>
+                            <span id="DaTestTvResult" class="da-note"></span>
+                        </div>
+                        <div class="da-sub" style="margin-top:1em;font-weight:700;">Jellyfin</div>
+                        <label class="da-check"><input type="checkbox" id="DaOnScreen"><span>Also show stuck and stalled recordings on the screens of admins using Jellyfin (they always go in the activity log)</span></label>
+                    </div>
+                </div>
+            </section>
+
+            <section id="DaSecQuiet" class="da-section">
+                <div class="da-head"><span class="da-num">3</span><h2>Quiet hours and repeats</h2></div>
+                <div class="da-card">
+                    <div class="da-row">
+                        <label class="da-check"><input type="checkbox" id="DaQuiet"><span>Quiet hours from</span></label>
+                        <input id="DaQuietFrom" class="da-text da-small" type="time" aria-label="Quiet hours start">
+                        <span>to</span>
+                        <input id="DaQuietTo" class="da-text da-small" type="time" aria-label="Quiet hours end">
+                        <span class="da-note">phone alerts arrive silently</span>
+                    </div>
+                    <label class="da-check"><input type="checkbox" id="DaFailedLoud"><span>Failed recordings still make a sound in quiet hours</span></label>
+                    <label class="da-check"><input type="checkbox" id="DaTellFixed"><span>Tell me once per problem, and again when it clears by itself</span></label>
+                    <div class="da-row">
+                        <span>Remind me about a problem still open after</span>
+                        <select id="DaRemind" is="emby-select" style="width:auto;" aria-label="Reminder">
+                            <option value="0">Never</option>
+                            <option value="6">6 hours</option>
+                            <option value="12">12 hours</option>
+                            <option value="24">24 hours</option>
+                        </select>
+                    </div>
+                </div>
+            </section>
+
+            <section id="DaSecCheck" class="da-section">
+                <div class="da-head"><span class="da-num">4</span><h2>Recording checks</h2></div>
+                <div class="da-grid">
+                    <div class="da-card">
+                        <h3>Recordings that don't start</h3>
+                        <div class="da-note">Jellyfin opens live streams one at a time, so a tuner that connects but never sends anything holds up every recording and live channel.</div>
+                        <label class="da-check"><input type="checkbox" id="DaStuckAlert"><span>Alert when a recording hasn't started</span></label>
+                        <div class="da-row"><span>after</span><input id="DaStuckSeconds" class="da-text da-small" type="number" min="30" max="1800" aria-label="Seconds after start"><span>seconds</span></div>
+                    </div>
+                    <div class="da-card">
+                        <h3>Recordings that stall</h3>
+                        <div class="da-note">A tuner can go quiet mid-recording; Jellyfin keeps "recording" nothing to the end.</div>
+                        <label class="da-check"><input type="checkbox" id="DaStallWatch"><span>Watch recordings for a file that stops growing</span></label>
+                        <div class="da-row"><span>for</span><input id="DaStallSeconds" class="da-text da-small" type="number" min="30" max="900" aria-label="Seconds without new data"><span>seconds</span></div>
+                        <label class="da-check"><input type="checkbox" id="DaStallRetune"><span>Tune it again: record the rest as a second file</span></label>
+                        <div class="da-row"><span>at most</span><input id="DaStallMax" class="da-text da-small" type="number" min="1" max="10" aria-label="Most retunes"><span>times per programme</span></div>
+                    </div>
+                    <div class="da-card">
+                        <h3>Short and failed recordings</h3>
+                        <div class="da-note">Episode History decides when a finished recording is too short (below its "recorded" percentage) or failed outright, records it again at the next airing, and reports it here.</div>
+                        <div class="da-row" style="margin-top:.8em;"><a is="emby-linkbutton" class="button-link" href="#/configurationpage?name=Episode%20History">Episode History settings →</a></div>
+                        <div class="da-note" style="margin-top:.6em;">Needs Episode History 1.1.3 or later.</div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="DaSecRecent" class="da-section">
+                <div class="da-head"><span class="da-num">5</span><h2>Recent problems</h2><span id="DaSumRecent" class="da-sum"></span></div>
+                <div class="da-scroll">
+                    <table>
+                        <thead><tr><th>When</th><th>Problem</th><th>State</th><th>Sent to</th></tr></thead>
+                        <tbody id="DaRecent"><tr><td colspan="4">Loading…</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <div class="da-save">
+                <span class="da-note">Changes apply straight away; no restart needed.</span>
+                <button is="emby-button" type="submit" class="raised button-submit emby-button"><span>Save</span></button>
+            </div>
+            </form>
+        </div>
+    </div>
+    <script type="text/javascript">
+        (function () {
+            var pluginId = "7c1dd9fc-123a-477b-b646-e735ed726d58";
+            var kinds = ["failed", "short", "tuner", "space", "guide"];
+            var page = document.querySelector("#DvrAlertsPage");
+            var config = null;
+
+            function $(sel) { return page.querySelector(sel); }
+            function defRoute(kind) { return { Kind: kind, Tv: kind !== "guide", Phone: true, Email: false }; }
+            function route(c, kind) {
+                return (c.AlertRoutes || []).filter(function (r) { return (r.Kind || "").toLowerCase() === kind; })[0] || defRoute(kind);
+            }
+            function num(id, def) { var v = parseInt($(id).value, 10); return isNaN(v) ? def : v; }
+            function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+            function when(iso) {
+                if (!iso) return "";
+                var d = new Date(iso);
+                return d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+            }
+
+            function badges(c) {
+                var phone = (c.NtfyTopic || "").trim().length > 0, email = (c.EmailTo || "").trim().length > 0 && (c.SmtpHost || "").trim().length > 0;
+                $("#DaBadgePhone").textContent = "Phone: " + (phone ? "on" : "off");
+                $("#DaBadgePhone").className = "da-badge" + (phone ? " da-on" : "");
+                $("#DaBadgeEmail").textContent = "Email: " + (email ? "on" : "off");
+                $("#DaBadgeEmail").className = "da-badge" + (email ? " da-on" : "");
+                $("#DaSumWhere").textContent = phone || email ? "" : "Only the TV and the activity log until a phone or email is set";
+            }
+
+            function fill(c) {
+                kinds.forEach(function (k) {
+                    var r = route(c, k), row = $('tr[data-kind="' + k + '"]');
+                    ["Tv", "Phone", "Email"].forEach(function (to) { row.querySelector('[data-to="' + to + '"]').checked = !!r[to]; });
+                });
+                $("#DaDiskGb").value = c.DiskFreeWarnGb || 50;
+                $("#DaGuideHours").value = c.GuideStaleHours || 24;
+                $("#DaNtfyServer").value = c.NtfyServer || "https://ntfy.sh";
+                $("#DaNtfyTopic").value = c.NtfyTopic || "";
+                $("#DaNtfyToken").value = c.NtfyToken || "";
+                $("#DaEmailTo").value = c.EmailTo || "";
+                $("#DaSmtpHost").value = c.SmtpHost || "";
+                $("#DaSmtpPort").value = c.SmtpPort || 587;
+                $("#DaSmtpSsl").checked = c.SmtpSsl !== false;
+                $("#DaSmtpUser").value = c.SmtpUser || "";
+                $("#DaSmtpPassword").value = c.SmtpPassword || "";
+                $("#DaEmailFrom").value = c.EmailFrom || "";
+                $("#DaTvPopup").checked = c.TvPopupOnOpen !== false;
+                $("#DaTvTile").checked = c.TvProblemsTile !== false;
+                $("#DaTvPlayback").checked = !!c.TvPopupDuringPlayback;
+                $("#DaOnScreen").checked = c.StuckRecordingOnScreen !== false;
+                $("#DaQuiet").checked = c.QuietHours !== false;
+                $("#DaQuietFrom").value = c.QuietFrom || "23:00";
+                $("#DaQuietTo").value = c.QuietTo || "07:00";
+                $("#DaFailedLoud").checked = c.FailedLoudInQuiet !== false;
+                $("#DaTellFixed").checked = c.TellWhenFixed !== false;
+                $("#DaRemind").value = String(c.RemindHours == null ? 12 : c.RemindHours);
+                if (!$("#DaRemind").value) $("#DaRemind").value = "12";
+                $("#DaStuckAlert").checked = c.StuckRecordingAlert !== false;
+                $("#DaStuckSeconds").value = c.StuckRecordingSeconds == null ? 90 : c.StuckRecordingSeconds;
+                $("#DaStallWatch").checked = c.StallWatch !== false;
+                $("#DaStallSeconds").value = c.StallSeconds == null ? 90 : c.StallSeconds;
+                $("#DaStallRetune").checked = c.StallRetune !== false;
+                $("#DaStallMax").value = c.StallMaxRetunes == null ? 3 : c.StallMaxRetunes;
+                badges(c);
+            }
+
+            // The page's values onto a settings object (the saved one, or a copy for a test).
+            function read(c) {
+                c.AlertRoutes = kinds.map(function (k) {
+                    var row = $('tr[data-kind="' + k + '"]');
+                    return {
+                        Kind: k,
+                        Tv: row.querySelector('[data-to="Tv"]').checked,
+                        Phone: row.querySelector('[data-to="Phone"]').checked,
+                        Email: row.querySelector('[data-to="Email"]').checked
+                    };
+                });
+                c.DiskFreeWarnGb = num("#DaDiskGb", 50);
+                c.GuideStaleHours = num("#DaGuideHours", 24);
+                c.NtfyServer = $("#DaNtfyServer").value.trim() || "https://ntfy.sh";
+                c.NtfyTopic = $("#DaNtfyTopic").value.trim();
+                c.NtfyToken = $("#DaNtfyToken").value.trim();
+                c.EmailTo = $("#DaEmailTo").value.trim();
+                c.SmtpHost = $("#DaSmtpHost").value.trim();
+                c.SmtpPort = num("#DaSmtpPort", 587);
+                c.SmtpSsl = $("#DaSmtpSsl").checked;
+                c.SmtpUser = $("#DaSmtpUser").value.trim();
+                c.SmtpPassword = $("#DaSmtpPassword").value;
+                c.EmailFrom = $("#DaEmailFrom").value.trim();
+                c.TvPopupOnOpen = $("#DaTvPopup").checked;
+                c.TvProblemsTile = $("#DaTvTile").checked;
+                c.TvPopupDuringPlayback = $("#DaTvPlayback").checked;
+                c.StuckRecordingOnScreen = $("#DaOnScreen").checked;
+                c.QuietHours = $("#DaQuiet").checked;
+                c.QuietFrom = $("#DaQuietFrom").value || "23:00";
+                c.QuietTo = $("#DaQuietTo").value || "07:00";
+                c.FailedLoudInQuiet = $("#DaFailedLoud").checked;
+                c.TellWhenFixed = $("#DaTellFixed").checked;
+                c.RemindHours = parseInt($("#DaRemind").value, 10) || 0;
+                c.StuckRecordingAlert = $("#DaStuckAlert").checked;
+                c.StuckRecordingSeconds = num("#DaStuckSeconds", 90);
+                c.StallWatch = $("#DaStallWatch").checked;
+                c.StallSeconds = num("#DaStallSeconds", 90);
+                c.StallRetune = $("#DaStallRetune").checked;
+                c.StallMaxRetunes = num("#DaStallMax", 3);
+                return c;
+            }
+
+            var kindNames = { failed: "Didn't record", short: "Short", tuner: "Tuner stuck", space: "Drive space", guide: "Guide" };
+            function loadRecent() {
+                ApiClient.getJSON(ApiClient.getUrl("JellyDvrSchedule/Alerts", { days: 30 })).then(function (r) {
+                    var rows = (r.Open || []).concat(r.Closed || []);
+                    rows.sort(function (a, b) { return new Date(b.CreatedUtc) - new Date(a.CreatedUtc); });
+                    var open = (r.Open || []).length;
+                    $("#DaBadgeOpen").textContent = open ? open + " open problem" + (open === 1 ? "" : "s") : "No open problems";
+                    $("#DaBadgeOpen").className = "da-badge " + (open ? "da-warn" : "da-on");
+                    $("#DaSumRecent").textContent = "Last 30 days";
+                    $("#DaRecent").innerHTML = rows.length ? rows.map(function (a) {
+                        var st = a.State === "open" ? '<span class="da-st-open">Open</span>'
+                            : a.State === "fixed" ? '<span class="da-st-fixed">Fixed ' + esc(when(a.ClosedUtc)) + "</span>"
+                            : '<span class="da-st-dismissed">' + (a.State === "ended" ? "Ended" : "Dismissed") + "</span>";
+                        var detail = esc(a.Text) + (a.Next ? "<br>" + esc(a.Next) : "") + (a.ClosedText && a.State === "fixed" ? "<br>" + esc(a.ClosedText) : "");
+                        return "<tr><td>" + esc(when(a.CreatedUtc)) + "</td><td><b>" + esc(a.Title) + "</b> · " + esc(kindNames[a.Kind] || a.Kind)
+                            + (a.Repeats ? " · seen " + (a.Repeats + 1) + " times" : "")
+                            + '<div class="da-note">' + detail + "</div></td><td>" + st + "</td><td>"
+                            + esc((a.OnTv ? ["TV"] : []).concat(a.SentTo || []).join(", ") || "Only this list") + "</td></tr>";
+                    }).join("") : '<tr><td colspan="4">No problems in the last 30 days.</td></tr>';
+                }, function () {
+                    $("#DaRecent").innerHTML = '<tr><td colspan="4">Could not load the list.</td></tr>';
+                });
+            }
+
+            function test(to, out) {
+                var c = read(JSON.parse(JSON.stringify(config || {})));
+                out.textContent = "Sending…";
+                out.className = "da-note";
+                ApiClient.ajax({
+                    type: "POST",
+                    url: ApiClient.getUrl("JellyDvrSchedule/Alerts/Test", { to: to }),
+                    data: JSON.stringify(c),
+                    contentType: "application/json",
+                    dataType: "json"
+                }).then(function (r) {
+                    out.textContent = r.Message;
+                    out.className = r.Ok ? "da-ok" : "da-bad";
+                }, function () {
+                    out.textContent = "The server didn't answer.";
+                    out.className = "da-bad";
+                });
+            }
+
+            page.addEventListener("viewshow", function () {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (c) {
+                    config = c;
+                    fill(c);
+                    Dashboard.hideLoadingMsg();
+                });
+                loadRecent();
+            });
+
+            page.querySelectorAll("[data-jump]").forEach(function (b) {
+                b.addEventListener("click", function () {
+                    $("#" + b.getAttribute("data-jump")).scrollIntoView({ behavior: "smooth", block: "start" });
+                });
+            });
+            $("#DaTestPhone").addEventListener("click", function () { test("phone", $("#DaTestPhoneResult")); });
+            $("#DaTestEmail").addEventListener("click", function () { test("email", $("#DaTestEmailResult")); });
+            $("#DaTestTv").addEventListener("click", function () {
+                var out = $("#DaTestTvResult");
+                ApiClient.ajax({ type: "POST", url: ApiClient.getUrl("JellyDvrSchedule/Alerts/TestTv"), dataType: "json" }).then(function (r) {
+                    out.textContent = r.Message;
+                    out.className = "da-ok";
+                    loadRecent();
+                }, function () {
+                    out.textContent = "The server didn't answer.";
+                    out.className = "da-bad";
+                });
+            });
+
+            $("#DaForm").addEventListener("submit", function (e) {
+                e.preventDefault();
+                Dashboard.showLoadingMsg();
+                // Read afresh: the Schedule page may have saved other settings meanwhile.
+                ApiClient.getPluginConfiguration(pluginId).then(function (c) {
+                    read(c);
+                    ApiClient.updatePluginConfiguration(pluginId, c).then(function (result) {
+                        config = c;
+                        badges(c);
+                        Dashboard.processPluginConfigurationUpdateResult(result);
+                    });
+                });
+                return false;
+            });
+        })();
+    </script>
+</div>
+</body>
+</html>
