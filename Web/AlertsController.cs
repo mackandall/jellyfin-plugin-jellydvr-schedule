@@ -44,6 +44,10 @@ public sealed class AlertsController : ControllerBase
         });
     }
 
+    /// <summary>Dismisses every open problem; answers how many.</summary>
+    [HttpPost("DismissAll")]
+    public IActionResult DismissAll() => Ok(new { Dismissed = _center.DismissAll() });
+
     [HttpPost("{id}/Dismiss")]
     public IActionResult Dismiss([FromRoute] string id) => _center.Dismiss(id) ? NoContent() : NotFound();
 

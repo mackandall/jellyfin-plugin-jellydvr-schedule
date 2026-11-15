@@ -207,6 +207,10 @@
 
             <section id="DaSecRecent" class="da-section">
                 <div class="da-head"><span class="da-num">5</span><h2>Recent problems</h2><span id="DaSumRecent" class="da-sum"></span></div>
+                <div class="da-row" style="margin-bottom:.8em;">
+                    <button is="emby-button" type="button" id="DaDismissAll" class="raised emby-button" hidden><span>Dismiss all open</span></button>
+                    <span id="DaDismissAllResult" class="da-note">Closed problems are removed by themselves after 30 days.</span>
+                </div>
                 <div class="da-scroll">
                     <table>
                         <thead><tr><th>When</th><th>Problem</th><th>State</th><th>Sent to</th></tr></thead>
@@ -339,6 +343,10 @@
                     $("#DaBadgeOpen").textContent = open ? open + " open problem" + (open === 1 ? "" : "s") : "No open problems";
                     $("#DaBadgeOpen").className = "da-badge " + (open ? "da-warn" : "da-on");
                     $("#DaSumRecent").textContent = "Last 30 days";
+                    var btn = $("#DaDismissAll");
+                    btn.hidden = open === 0;
+                    btn.querySelector("span").textContent = "Dismiss all open (" + open + ")";
+                    btn.removeAttribute("data-armed");
                     $("#DaRecent").innerHTML = rows.length ? rows.map(function (a) {
                         var st = a.State === "open" ? '<span class="da-st-open">Open</span>'
                             : a.State === "fixed" ? '<span class="da-st-fixed">Fixed ' + esc(when(a.ClosedUtc)) + "</span>"
@@ -390,6 +398,29 @@
             });
             $("#DaTestPhone").addEventListener("click", function () { test("phone", $("#DaTestPhoneResult")); });
             $("#DaTestEmail").addEventListener("click", function () { test("email", $("#DaTestEmailResult")); });
+            // Press twice: the first press arms it for a few seconds.
+            $("#DaDismissAll").addEventListener("click", function () {
+                var btn = $("#DaDismissAll"), label = btn.querySelector("span"), out = $("#DaDismissAllResult");
+                if (!btn.getAttribute("data-armed")) {
+                    btn.setAttribute("data-armed", "1");
+                    var before = label.textContent;
+                    label.textContent = "Press again to dismiss them all";
+                    setTimeout(function () {
+                        if (btn.getAttribute("data-armed")) {
+                            btn.removeAttribute("data-armed");
+                            label.textContent = before;
+                        }
+                    }, 4000);
+                    return;
+                }
+                btn.removeAttribute("data-armed");
+                ApiClient.ajax({ type: "POST", url: ApiClient.getUrl("JellyDvrSchedule/Alerts/DismissAll"), dataType: "json" }).then(function (r) {
+                    out.textContent = "Dismissed " + r.Dismissed + ".";
+                    loadRecent();
+                }, function () {
+                    out.textContent = "The server didn't answer.";
+                });
+            });
             $("#DaTestTv").addEventListener("click", function () {
                 var out = $("#DaTestTvResult");
                 ApiClient.ajax({ type: "POST", url: ApiClient.getUrl("JellyDvrSchedule/Alerts/TestTv"), dataType: "json" }).then(function (r) {

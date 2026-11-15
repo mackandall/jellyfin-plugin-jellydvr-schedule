@@ -287,6 +287,28 @@ public sealed class AlertCenter
         }
     }
 
+    /// <summary>Dismisses every open problem (after a known outage, say); returns how many.</summary>
+    public int DismissAll()
+    {
+        lock (_lock)
+        {
+            var now = DateTime.UtcNow;
+            var open = _alerts.Where(a => a.State == Alert.Open).ToList();
+            foreach (var a in open)
+            {
+                a.State = Alert.Dismissed;
+                a.ClosedUtc = a.UpdatedUtc = now;
+            }
+
+            if (open.Count > 0)
+            {
+                SaveLocked();
+            }
+
+            return open.Count;
+        }
+    }
+
     /// <summary>Whether a problem with this key is open.</summary>
     public bool IsOpen(string key)
     {
