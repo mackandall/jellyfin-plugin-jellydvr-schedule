@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Sports overruns</title>
+</head>
+<body>
+<div id="DvrOverrunsPage"
+     data-role="page"
+     class="page type-interior pluginConfigurationPage"
+     data-require="emby-input,emby-button,emby-checkbox,emby-select">
+    <style>
+        #DvrOverrunsPage [hidden] { display: none !important; }
+        #DvrOverrunsPage .so-header { display: flex; align-items: center; gap: .7em; flex-wrap: wrap; margin-bottom: .8em; }
+        #DvrOverrunsPage .so-header h1 { margin: 0; font-size: 1.9em; font-weight: 700; }
+        #DvrOverrunsPage .so-badge { font-size: .8em; padding: .3em .8em; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); }
+        #DvrOverrunsPage .so-badge.so-on { color: #22c55e; border-color: rgba(34,197,94,.45); }
+        #DvrOverrunsPage .so-badge.so-warn { color: #f5b544; border-color: rgba(245,181,68,.45); }
+        #DvrOverrunsPage .so-jump { display: flex; gap: .5em; flex-wrap: wrap; padding: .7em 0; margin-bottom: 1.6em; border-top: 1px solid rgba(255,255,255,.1); border-bottom: 1px solid rgba(255,255,255,.1); }
+        #DvrOverrunsPage .so-jump button { margin: 0; font-size: .85em; padding: .4em .9em; border-radius: 999px; }
+        #DvrOverrunsPage .so-section { margin-bottom: 2.4em; scroll-margin-top: 5em; }
+        #DvrOverrunsPage .so-head { display: flex; align-items: center; gap: .8em; flex-wrap: wrap; border-bottom: 2px solid #00a4dc; padding-bottom: .45em; margin-bottom: .9em; }
+        #DvrOverrunsPage .so-num { background: #00a4dc; color: #06121a; font-weight: 700; border-radius: 6px; width: 1.75em; height: 1.75em; display: flex; align-items: center; justify-content: center; flex: none; }
+        #DvrOverrunsPage .so-head h2 { margin: 0; font-size: 1.5em; font-weight: 700; }
+        #DvrOverrunsPage .so-sum { margin-left: auto; font-size: .9em; opacity: .75; }
+        #DvrOverrunsPage .so-lead { max-width: 52em; opacity: .85; margin: 0 0 1em; }
+        #DvrOverrunsPage .so-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(20em, 1fr)); gap: .8em 1.4em; }
+        #DvrOverrunsPage .so-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(16em, 1fr)); gap: .8em; }
+        #DvrOverrunsPage .so-card { background: rgba(255,255,255,.05); border-radius: 8px; padding: .9em 1.1em; }
+        #DvrOverrunsPage .so-card h3 { margin: 0 0 .3em; font-size: 1.05em; }
+        #DvrOverrunsPage .so-note { font-size: .88em; opacity: .75; }
+        #DvrOverrunsPage label.so-field { display: block; font-weight: 600; }
+        #DvrOverrunsPage label.so-field span.so-note { display: block; font-weight: 400; margin-top: .25em; }
+        #DvrOverrunsPage .so-input { width: 100%; box-sizing: border-box; margin-top: .35em; padding: .45em .6em; background: rgba(0,0,0,.25); color: inherit; border: 1px solid rgba(255,255,255,.18); border-radius: 6px; font: inherit; }
+        #DvrOverrunsPage .so-input.so-small { width: 6em; }
+        #DvrOverrunsPage select.so-input option { background: #202020; }
+        #DvrOverrunsPage .so-box { background: rgba(255,255,255,.05); border-radius: 8px; padding: .4em 1.1em; margin-top: 1em; }
+        #DvrOverrunsPage .so-check { display: flex; align-items: flex-start; gap: .6em; cursor: pointer; margin: .7em 0; }
+        #DvrOverrunsPage .so-check input { width: 1.15em; height: 1.15em; accent-color: #00a4dc; margin: .2em 0 0; flex: none; }
+        #DvrOverrunsPage .so-scroll { overflow-x: auto; background: rgba(255,255,255,.05); border-radius: 8px; }
+        #DvrOverrunsPage table { width: 100%; min-width: 44em; border-collapse: collapse; font-size: .92em; }
+        #DvrOverrunsPage th { text-align: left; opacity: .7; padding: .6em .8em; font-weight: 600; }
+        #DvrOverrunsPage td { padding: .6em .8em; border-top: 1px solid rgba(255,255,255,.08); vertical-align: top; }
+        #DvrOverrunsPage .so-pill { display: inline-block; font-size: .8em; padding: .15em .6em; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+        #DvrOverrunsPage .so-p-ok { color: #7fd1a0; border-color: rgba(127,209,160,.5); }
+        #DvrOverrunsPage .so-p-wait { color: #cfcfcf; border-color: rgba(255,255,255,.3); }
+        #DvrOverrunsPage .so-p-ext { color: #7fd3f2; border-color: rgba(127,211,242,.5); }
+        #DvrOverrunsPage .so-p-run { color: #f5b544; border-color: rgba(245,181,68,.5); }
+        #DvrOverrunsPage .so-p-bad { color: #ff8f86; border-color: rgba(255,143,134,.5); }
+        #DvrOverrunsPage .so-recent { white-space: pre-line !important; font-size: .9em; opacity: .85; }
+        #DvrOverrunsPage .so-row { display: flex; gap: .8em; align-items: center; flex-wrap: wrap; margin-bottom: .8em; }
+        #DvrOverrunsPage .so-row button { margin: 0; }
+        #DvrOverrunsPage ol.so-how { margin: 1em 0 0; padding-left: 1.4em; max-width: 52em; opacity: .85; }
+        #DvrOverrunsPage ol.so-how li { margin: .3em 0; }
+        #DvrOverrunsPage .so-save { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 1em; padding: .8em 0; margin-bottom: 2em; background: var(--jf-palette-background-default, #101010); border-top: 1px solid rgba(255,255,255,.12); }
+        #DvrOverrunsPage .so-save button { margin: 0 0 0 auto; width: auto; min-width: 10em; }
+    </style>
+    <div data-role="content">
+        <div class="content-primary">
+            <form id="SoForm">
+            <div class="so-header">
+                <h1>Sports overruns</h1>
+                <span id="SoBadge" class="so-badge">Mode</span>
+                <span id="SoBoard" class="so-badge">Scoreboard</span>
+                <a is="emby-linkbutton" class="button-link" style="margin-left:auto;" href="#/configurationpage?name=JellyDVR%20Schedule">← JellyDVR Schedule</a>
+            </div>
+            <nav class="so-jump" aria-label="Sections">
+                <button is="emby-button" type="button" class="raised" data-jump="SoSecNow">1 Now and tonight</button>
+                <button is="emby-button" type="button" class="raised" data-jump="SoSecSettings">2 Settings</button>
+                <button is="emby-button" type="button" class="raised" data-jump="SoSecSports">3 Extra time by sport</button>
+                <button is="emby-button" type="button" class="raised" data-jump="SoSecChannels">4 Channels</button>
+                <button is="emby-button" type="button" class="raised" data-jump="SoSecRecent">5 Recent actions</button>
+            </nav>
+
+            <section id="SoSecNow" class="so-section">
+                <div class="so-head"><span class="so-num">1</span><h2>Now and tonight</h2><span id="SoNowSum" class="so-sum">Loading…</span></div>
+                <p class="so-lead">When a live game runs late, the shows after it on that channel start late too. The score is
+                    followed on ESPN's scoreboard, and shortly before each of those recordings starts its end is moved later.
+                    Jellyfin fixes a recording's length when it starts, so that is the last moment it can change. A recording
+                    of the game itself gets extra time for overtime, and a follow-up recording if it's still going.</p>
+                <div class="so-row">
+                    <button is="emby-button" type="button" id="SoCheck" class="raised"><span>Check now</span></button>
+                    <span id="SoChecked" class="so-note"></span>
+                </div>
+                <div class="so-scroll">
+                    <table>
+                        <thead><tr><th>Recording</th><th>Channel</th><th>Game</th><th>Game status</th><th>Change</th><th>State</th></tr></thead>
+                        <tbody id="SoWatches"><tr><td colspan="6" class="so-note">Loading…</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="SoSecSettings" class="so-section">
+                <div class="so-head"><span class="so-num">2</span><h2>Settings</h2><span class="so-sum">Preview changes nothing</span></div>
+                <div class="so-grid">
+                    <label class="so-field" for="SoMode">Mode
+                        <select id="SoMode" class="so-input">
+                            <option value="off">Off</option>
+                            <option value="preview">Preview: show what would change</option>
+                            <option value="active">Active: change recordings</option>
+                        </select>
+                        <span class="so-note">Preview fills the table above and touches nothing.</span>
+                    </label>
+                    <label class="so-field" for="SoLookBack">Look-back (hours)
+                        <input id="SoLookBack" type="number" min="1" max="8" class="so-input so-small" />
+                        <span class="so-note">How long before a recording a game on its channel can end and still count.</span>
+                    </label>
+                    <label class="so-field" for="SoMargin">Safety margin (minutes)
+                        <input id="SoMargin" type="number" min="0" max="60" class="so-input so-small" />
+                        <span class="so-note">Added to every estimate from the game clock.</span>
+                    </label>
+                    <label class="so-field" for="SoCap">Most extra time per recording (minutes)
+                        <input id="SoCap" type="number" min="5" max="360" class="so-input so-small" />
+                        <span class="so-note">Over this the recording is capped and you get an alert.</span>
+                    </label>
+                    <label class="so-field" for="SoPoll">Check the score every (minutes)
+                        <input id="SoPoll" type="number" min="1" max="10" class="so-input so-small" />
+                        <span class="so-note">Only while a watched game is on.</span>
+                    </label>
+                    <label class="so-field" for="SoFollow">Follow-ups for game recordings
+                        <select id="SoFollow" class="so-input">
+                            <option value="0">Off</option>
+                            <option value="60">Up to 1 hour</option>
+                            <option value="120">Up to 2 hours</option>
+                            <option value="240">Up to 4 hours</option>
+                        </select>
+                        <span class="so-note">Needs a free tuner at the handover. Joined onto the game's recording when it's over.</span>
+                    </label>
+                </div>
+                <div class="so-box">
+                    <label class="so-check"><input type="checkbox" id="SoKeepPad" /><span><b>Keep the shows' own end padding too</b><br><span class="so-note">The extra time is added on top of it.</span></span></label>
+                    <label class="so-check"><input type="checkbox" id="SoMoveStart" /><span><b>Also start the shows after a late game later</b><br><span class="so-note">Frees the tuner during the game. Off by default: a wrong estimate cuts off the start of the show. Only used when the game clock gives an estimate.</span></span></label>
+                    <label class="so-check"><input type="checkbox" id="SoAlerts" /><span><b>Alert me</b> when a recording is capped or a follow-up can't be recorded<br><span class="so-note">As a "short recording" problem, sent where the Alerts page says. Active mode only.</span></span></label>
+                </div>
+                <h3 style="margin:1.4em 0 .2em;">In the guides (web and JDVR)</h3>
+                <div class="so-grid">
+                    <label class="so-field" for="SoMarks">Mark late games
+                        <select id="SoMarks" class="so-input">
+                            <option value="affected">Only when a recording is affected</option>
+                            <option value="all">Every game, and the shows it pushes back</option>
+                            <option value="off">Don't mark the guides</option>
+                        </select>
+                        <span class="so-note">“Every game” follows each game on the guide's channels on the scoreboard.</span>
+                    </label>
+                </div>
+                <div class="so-box">
+                    <label class="so-check"><input type="checkbox" id="SoScores" /><span><b>Show the score</b> beside the game clock<br><span class="so-note">Off: only the clock (“4th 2:10”), so a game you're recording isn't spoiled.</span></span></label>
+                    <label class="so-check"><input type="checkbox" id="SoEstimates" /><span><b>Show the extra time before it's decided</b><br><span class="so-note">As a dashed “≈ +22” until 3 minutes before the show; off: only once it's decided.</span></span></label>
+                    <label class="so-check"><input type="checkbox" id="SoButtons" /><span><b>Offer “Keep the normal end” and “Add 15 more minutes”</b> on a marked recording<br><span class="so-note">In the guide's programme dialog and JDVR's menu, for people allowed to manage recordings.</span></span></label>
+                </div>
+                <ol class="so-how">
+                    <li>A recording is watched when a game (two teams in the guide title, such as “49ers at Cowboys”) is on its channel within the look-back time before it, or when the recording is a game.</li>
+                    <li>The game is matched on ESPN's public scoreboard by the two teams and its start time. NFL, college football, NBA, WNBA, college basketball, NHL, MLB and the main soccer leagues are covered.</li>
+                    <li>Three minutes before the recording starts, its end moves later if the channel won't be back on schedule in time: the time the game still needs, plus the network's coverage after the final (section 3), plus the margin. Postgame shows listed in the guide count towards that coverage.</li>
+                    <li>No match on the scoreboard: the sport's fixed extra time is used instead.</li>
+                </ol>
+            </section>
+
+            <section id="SoSecSports" class="so-section">
+                <div class="so-head"><span class="so-num">3</span><h2>Extra time by sport</h2><span class="so-sum">Minutes</span></div>
+                <p class="so-lead">Fixed extra: added to a recording of a game when it starts (for overtime), and to the shows after a game the scoreboard can't follow.
+                    Coverage after the final: how long the channel stays on the game after it ends (postgame interviews, other scores) before the next show starts;
+                    postgame shows listed in the guide count towards it.</p>
+                <div class="so-scroll">
+                    <table>
+                        <thead><tr><th>Sport</th><th>Fixed extra</th><th>Coverage after the final</th><th>Estimate from the game clock</th></tr></thead>
+                        <tbody id="SoSports"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="SoSecChannels" class="so-section">
+                <div class="so-head"><span class="so-num">4</span><h2>Channels</h2><span id="SoChanSum" class="so-sum"></span></div>
+                <p class="so-lead">What a late game does to the shows after it. Broadcast networks usually push the whole evening back;
+                    some channels let the next show join in progress instead, so there's nothing to recover.</p>
+                <label class="so-field" for="SoDefaultChannel" style="max-width:24em;">Channels not set below
+                    <select id="SoDefaultChannel" class="so-input">
+                        <option value="shift">Whole evening shifts</option>
+                        <option value="next">Next show only</option>
+                        <option value="joins">Joins in progress (no change)</option>
+                    </select>
+                </label>
+                <div id="SoChannels" class="so-cards" style="margin-top:1em;"></div>
+            </section>
+
+            <section id="SoSecRecent" class="so-section">
+                <div class="so-head"><span class="so-num">5</span><h2>Recent actions</h2><span class="so-sum">Since the server started</span></div>
+                <div id="SoChains"></div>
+                <div id="SoRecent" class="so-recent">None yet.</div>
+            </section>
+
+            <div class="so-save">
+                <span id="SoSaved" class="so-note"></span>
+                <button is="emby-button" type="submit" class="raised button-submit emby-button"><span>Save</span></button>
+            </div>
+            </form>
+        </div>
+    </div>
+    <script type="text/javascript">
+        (function () {
+            var pluginId = "7c1dd9fc-123a-477b-b646-e735ed726d58";
+            var page = document.querySelector("#DvrOverrunsPage");
+            var sports = [
+                { kind: "nfl", name: "NFL", how: "About 3 min of air per game minute left, more in the last 5; +15 for halftime" },
+                { kind: "college-football", name: "College football", how: "About 3.5 min per game minute left; overtime +20" },
+                { kind: "basketball", name: "Basketball (NBA, WNBA, college)", how: "About 2.8 min per game minute left, more in the last 5" },
+                { kind: "hockey", name: "NHL", how: "About 2 min per game minute left, +18 per intermission" },
+                { kind: "baseball", name: "MLB", how: "About 9 min per half-inning left" },
+                { kind: "soccer", name: "Soccer", how: "Minutes left + 5 for stoppage time (+15 at halftime)" },
+                { kind: "other", name: "Other / not on the scoreboard", how: "Fixed extra only" }
+            ];
+            var channelModes = {};
+            var channels = [];
+
+            function $(sel) { return page.querySelector(sel); }
+            function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+            function time(t) { return new Date(t).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }); }
+            function hm(t) { return new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+            function api(method, path) { return ApiClient.ajax({ type: method, url: ApiClient.getUrl(path), dataType: "json" }); }
+
+            var pills = {
+                watching: ["so-p-wait", "Watching"], ontime: ["so-p-ok", "On time"], extend: ["so-p-ext", "Extended"],
+                capped: ["so-p-bad", "Capped"], joins: ["so-p-wait", "No change"], toolate: ["so-p-bad", "Too late"],
+                followup: ["so-p-run", "Follow-up"], nofollowup: ["so-p-bad", "No follow-up"]
+            };
+
+            function renderStatus(s) {
+                var watches = s.Watches || [];
+                var rows = watches.map(function (w) {
+                    var p = pills[w.State] || ["so-p-wait", w.State];
+                    var label = (w.State === "extend" || w.State === "capped") && !w.Applied ? "Will extend" : p[1];
+                    var change = w.ExtraMinutes > 0 ? "end +" + w.ExtraMinutes + " min" + (w.LaterStartMinutes > 0 ? ", start +" + w.LaterStartMinutes : "") : (w.State === "followup" ? "follow-up" : "none");
+                    var role = w.Role === "game" ? "recording the game" : w.Role === "followup" ? "follow-up" : "";
+                    var listed = w.GameStartUtc && w.GameStartUtc > "2000" ? "<div class='so-note'>listed " + esc(hm(w.GameStartUtc)) + "–" + esc(hm(w.GameEndUtc)) + "</div>" : "";
+                    return "<tr><td>" + esc(w.Title) + "<div class='so-note'>" + esc(time(w.StartUtc)) + "–" + esc(hm(w.EndUtc)) + (role ? " · " + role : "") + "</div></td>"
+                        + "<td>" + esc(w.ChannelName) + "<div class='so-note'>" + esc({ shift: "evening shifts", next: "next show only", joins: "joins in progress" }[w.ChannelMode] || "") + "</div></td>"
+                        + "<td>" + esc(w.GameTitle) + listed + "</td>"
+                        + "<td>" + esc(w.GameStatus || "—") + "</td>"
+                        + "<td>" + esc(change) + "</td>"
+                        + "<td><span class='so-pill " + p[0] + "'>" + esc(label) + "</span>" + (w.Note ? "<div class='so-note'>" + esc(w.Note) + "</div>" : "") + "</td></tr>";
+                });
+                $("#SoWatches").innerHTML = rows.length ? rows.join("")
+                    : "<tr><td colspan='6' class='so-note'>" + (s.Mode === "off" ? "Sports overruns is off." : "No recording in the next 14 hours follows a game or is one.") + "</td></tr>";
+                var n = watches.filter(function (w) { return w.State === "extend" || w.State === "capped" || w.State === "followup"; }).length;
+                $("#SoNowSum").textContent = watches.length + " watched" + (n ? " · " + n + " with extra time" : "");
+                $("#SoChecked").textContent = s.LastCheckUtc ? "Checked " + hm(s.LastCheckUtc) : "Not checked yet (the first check is about a minute after the server starts).";
+                var board = $("#SoBoard");
+                board.textContent = s.ScoreboardOkUtc ? "Scoreboard: OK " + hm(s.ScoreboardOkUtc) : s.ScoreboardError ? "Scoreboard: not answering" : "Scoreboard: not needed yet";
+                board.className = "so-badge" + (s.ScoreboardOkUtc ? " so-on" : s.ScoreboardError ? " so-warn" : "");
+                board.title = s.ScoreboardError || "";
+                channels = s.Channels || [];
+                renderChannels();
+                var chains = (s.Chains || []).map(function (c) { return esc(c.Title) + ": " + c.Parts + " recordings, " + esc(c.State) + (c.Note ? " (" + esc(c.Note) + ")" : ""); });
+                $("#SoChains").innerHTML = chains.length ? "<p><b>Game recordings with follow-ups</b><br>" + chains.join("<br>") + "</p>" : "";
+                $("#SoRecent").textContent = (s.Recent || []).length ? s.Recent.join("\n") : "None yet.";
+            }
+
+            function renderChannels() {
+                var host = $("#SoChannels");
+                host.innerHTML = "";
+                if (!channels.length) {
+                    host.innerHTML = "<div class='so-note'>No games in the guide this week.</div>";
+                }
+                channels.forEach(function (c) {
+                    var card = document.createElement("div");
+                    card.className = "so-card";
+                    card.innerHTML = "<h3>" + esc(c.Name) + "</h3><div class='so-note'>" + (c.Number ? "Channel " + esc(c.Number) + " · " : "") + c.Games + " game" + (c.Games === 1 ? "" : "s") + " in the guide</div>"
+                        + "<select class='so-input' aria-label='" + esc(c.Name) + " after a late game'>"
+                        + "<option value=''>As other channels</option><option value='shift'>Whole evening shifts</option><option value='next'>Next show only</option><option value='joins'>Joins in progress (no change)</option></select>";
+                    var sel = card.querySelector("select");
+                    sel.value = channelModes[c.Id] || "";
+                    sel.addEventListener("change", function () { if (sel.value) { channelModes[c.Id] = sel.value; } else { delete channelModes[c.Id]; } });
+                    host.appendChild(card);
+                });
+                $("#SoChanSum").textContent = channels.length + " with games in the guide";
+            }
+
+            function renderSports(c) {
+                var minutes = {}, post = {};
+                var postDefault = { "nfl": 25, "college-football": 15 };
+                (c.OverrunSportMinutes || []).forEach(function (s) { minutes[s.Kind] = s.Minutes; post[s.Kind] = s.PostgameMinutes; });
+                $("#SoSports").innerHTML = sports.map(function (s) {
+                    return "<tr><td>" + esc(s.name) + "</td><td><input type='number' min='0' max='240' class='so-input so-small' data-sport='" + s.kind + "' value='" + (minutes[s.kind] != null ? minutes[s.kind] : 30) + "' aria-label='" + esc(s.name) + " minutes'></td><td><input type='number' min='0' max='120' class='so-input so-small' data-postgame='" + s.kind + "' value='" + (post[s.kind] != null ? post[s.kind] : (postDefault[s.kind] || 10)) + "' aria-label='" + esc(s.name) + " postgame minutes'></td><td class='so-note'>" + esc(s.how) + "</td></tr>";
+                }).join("");
+            }
+
+            function badge(c) {
+                var b = $("#SoBadge");
+                b.textContent = "Mode: " + ({ off: "Off", preview: "Preview", active: "Active" }[c.OverrunMode] || c.OverrunMode);
+                b.className = "so-badge" + (c.OverrunMode === "active" ? " so-on" : c.OverrunMode === "preview" ? " so-warn" : "");
+            }
+
+            function fill(c) {
+                $("#SoMode").value = c.OverrunMode || "preview";
+                $("#SoLookBack").value = c.OverrunLookBackHours;
+                $("#SoMargin").value = c.OverrunMarginMinutes;
+                $("#SoCap").value = c.OverrunCapMinutes;
+                $("#SoPoll").value = c.OverrunPollMinutes;
+                $("#SoFollow").value = String([0, 60, 120, 240].indexOf(c.OverrunFollowUpMinutes) >= 0 ? c.OverrunFollowUpMinutes : 120);
+                $("#SoKeepPad").checked = !!c.OverrunKeepPadding;
+                $("#SoMoveStart").checked = !!c.OverrunMoveStart;
+                $("#SoAlerts").checked = !!c.OverrunAlerts;
+                $("#SoDefaultChannel").value = c.OverrunDefaultChannel || "shift";
+                $("#SoMarks").value = c.OverrunGuideMarks || "affected";
+                $("#SoScores").checked = !!c.OverrunShowScores;
+                $("#SoEstimates").checked = c.OverrunShowEstimates !== false;
+                $("#SoButtons").checked = c.OverrunGuideButtons !== false;
+                channelModes = {};
+                (c.OverrunChannels || []).forEach(function (x) { channelModes[x.ChannelId] = x.Mode; });
+                renderSports(c);
+                renderChannels();
+                badge(c);
+            }
+
+            function num(sel, lo, hi, def) { var v = parseInt($(sel).value, 10); return isNaN(v) ? def : Math.min(hi, Math.max(lo, v)); }
+
+            function read(c) {
+                c.OverrunMode = $("#SoMode").value;
+                c.OverrunLookBackHours = num("#SoLookBack", 1, 8, 3);
+                c.OverrunMarginMinutes = num("#SoMargin", 0, 60, 10);
+                c.OverrunCapMinutes = num("#SoCap", 5, 360, 90);
+                c.OverrunPollMinutes = num("#SoPoll", 1, 10, 2);
+                c.OverrunFollowUpMinutes = parseInt($("#SoFollow").value, 10) || 0;
+                c.OverrunKeepPadding = $("#SoKeepPad").checked;
+                c.OverrunMoveStart = $("#SoMoveStart").checked;
+                c.OverrunAlerts = $("#SoAlerts").checked;
+                c.OverrunDefaultChannel = $("#SoDefaultChannel").value;
+                c.OverrunGuideMarks = $("#SoMarks").value;
+                c.OverrunShowScores = $("#SoScores").checked;
+                c.OverrunShowEstimates = $("#SoEstimates").checked;
+                c.OverrunGuideButtons = $("#SoButtons").checked;
+                c.OverrunChannels = Object.keys(channelModes).map(function (id) { return { ChannelId: id, Mode: channelModes[id] }; });
+                c.OverrunSportMinutes = Array.prototype.map.call(page.querySelectorAll("[data-sport]"), function (i) {
+                    var v = parseInt(i.value, 10);
+                    var pg = parseInt((page.querySelector("[data-postgame='" + i.getAttribute("data-sport") + "']") || {}).value, 10);
+                    return { Kind: i.getAttribute("data-sport"), Minutes: isNaN(v) ? 30 : Math.min(240, Math.max(0, v)), PostgameMinutes: isNaN(pg) ? null : Math.min(120, Math.max(0, pg)) };
+                });
+            }
+
+            function loadStatus() {
+                return api("GET", "JellyDvrSchedule/Overruns").then(renderStatus, function () {
+                    $("#SoWatches").innerHTML = "<tr><td colspan='6'>The server didn't answer.</td></tr>";
+                });
+            }
+
+            page.addEventListener("viewshow", function () {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (c) {
+                    fill(c);
+                    Dashboard.hideLoadingMsg();
+                    loadStatus();
+                });
+            });
+
+            page.querySelectorAll("[data-jump]").forEach(function (b) {
+                b.addEventListener("click", function () {
+                    $("#" + b.getAttribute("data-jump")).scrollIntoView({ behavior: "smooth", block: "start" });
+                });
+            });
+
+            $("#SoCheck").addEventListener("click", function () {
+                $("#SoChecked").textContent = "Checking…";
+                api("POST", "JellyDvrSchedule/Overruns/Check").then(renderStatus, function () { $("#SoChecked").textContent = "The check failed."; });
+            });
+
+            $("#SoForm").addEventListener("submit", function (e) {
+                e.preventDefault();
+                Dashboard.showLoadingMsg();
+                // Read afresh: the other Schedule pages may have saved settings meanwhile.
+                ApiClient.getPluginConfiguration(pluginId).then(function (c) {
+                    read(c);
+                    ApiClient.updatePluginConfiguration(pluginId, c).then(function (result) {
+                        badge(c);
+                        Dashboard.processPluginConfigurationUpdateResult(result);
+                        loadStatus();
+                    });
+                });
+                return false;
+            });
+        })();
+    </script>
+</div>
+</body>
+</html>

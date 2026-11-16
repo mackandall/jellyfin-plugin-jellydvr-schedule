@@ -1,4 +1,5 @@
 using Jellyfin.Plugin.DvrSchedule.Alerts;
+using Jellyfin.Plugin.DvrSchedule.Overruns;
 using Jellyfin.Plugin.DvrSchedule.Schedule;
 using Jellyfin.Plugin.DvrSchedule.Web;
 using MediaBrowser.Controller;
@@ -33,6 +34,11 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<RecordingStartWatchdog>());
         serviceCollection.AddSingleton<RecordingStallWatchdog>();
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<RecordingStallWatchdog>());
+        serviceCollection.AddSingleton<Scoreboard>();
+        serviceCollection.AddSingleton<OverrunStore>();
+        serviceCollection.AddSingleton<FollowUpJoiner>();
+        serviceCollection.AddSingleton<OverrunWatcher>();
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<OverrunWatcher>());
 
         // Jellyfin builds its MVC ApplicationPartManager from its own assembly before any
         // plugin loads and never re-scans, so a plugin's controllers are silently absent

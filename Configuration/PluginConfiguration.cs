@@ -154,6 +154,65 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Warn when the guide hasn't been refreshed for this many hours.</summary>
     public int GuideStaleHours { get; set; } = 24;
 
+    // ---- Sports overruns (Overruns/; the "Sports overruns" page) ------------------------------
+
+    public const string OverrunOff = "off";
+    public const string ChannelShift = "shift";
+    public const string ChannelNext = "next";
+    public const string ChannelJoins = "joins";
+
+    public const string GuideMarksAffected = "affected";
+
+    public const string GuideMarksAll = "all";
+
+    /// <summary>"off", "preview" (show what would change) or "active" (change recordings).</summary>
+    public string OverrunMode { get; set; } = ModePreview;
+
+    /// <summary>A game counts for a recording when it airs on the same channel up to this long before it (hours).</summary>
+    public int OverrunLookBackHours { get; set; } = 3;
+
+    /// <summary>Minutes added to every estimate from the game clock.</summary>
+    public int OverrunMarginMinutes { get; set; } = 10;
+
+    /// <summary>Most extra minutes one recording gets; over this it is capped and an alert goes out.</summary>
+    public int OverrunCapMinutes { get; set; } = 90;
+
+    /// <summary>How often the score is checked while a watched game is on (minutes).</summary>
+    public int OverrunPollMinutes { get; set; } = 2;
+
+    /// <summary>A game recording still going at its end gets follow-up recordings up to this many minutes in all (0 = none).</summary>
+    public int OverrunFollowUpMinutes { get; set; } = 120;
+
+    /// <summary>Also start the shows after a late game later (frees the tuner during the game).</summary>
+    public bool OverrunMoveStart { get; set; }
+
+    /// <summary>The recording's own end padding is kept on top of the extra time.</summary>
+    public bool OverrunKeepPadding { get; set; } = true;
+
+    /// <summary>Alert when a recording is capped or a follow-up can't be recorded.</summary>
+    public bool OverrunAlerts { get; set; } = true;
+
+    /// <summary>Fixed extra minutes per sport (<see cref="Overruns.SportKinds"/>), used when the game clock can't tell.</summary>
+    public SportExtra[] OverrunSportMinutes { get; set; } = SportExtra.Defaults();
+
+    /// <summary>What a late game does to the shows after it, per channel; channels not listed use <see cref="OverrunDefaultChannel"/>.</summary>
+    public ChannelOverrun[] OverrunChannels { get; set; } = Array.Empty<ChannelOverrun>();
+
+    /// <summary>"shift" (the whole evening moves), "next" (only the next show) or "joins" (the next show joins in progress: no change).</summary>
+    public string OverrunDefaultChannel { get; set; } = ChannelShift;
+
+    /// <summary>Guide marks for late games: "affected" (only games and shows with a recording), "all", or "off".</summary>
+    public string OverrunGuideMarks { get; set; } = GuideMarksAffected;
+
+    /// <summary>Show the score beside the game clock in the guide (off: no spoilers).</summary>
+    public bool OverrunShowScores { get; set; }
+
+    /// <summary>Show the extra time as a dashed estimate before it's decided (off: only once decided).</summary>
+    public bool OverrunShowEstimates { get; set; } = true;
+
+    /// <summary>"Keep the normal end" and "Add 15 more minutes" in the guide's programme dialog and JDVR.</summary>
+    public bool OverrunGuideButtons { get; set; } = true;
+
     /// <summary>Title/keyword recording rules, independent of guide ids.</summary>
     public FavouriteRule[] Favourites { get; set; } = Array.Empty<FavouriteRule>();
 
@@ -239,4 +298,47 @@ public class FavouriteRule
 
     /// <summary>On, or off only for a while (it still schedules what airs after that).</summary>
     public bool IsScheduling() => Enabled || OffUntil.HasValue;
+}
+
+/// <summary>Fixed extra time for one sport.</summary>
+public class SportExtra
+{
+    public string Kind { get; set; } = string.Empty;
+
+    public int Minutes { get; set; }
+
+    /// <summary>
+    /// How long the channel stays on the game after the final whistle (postgame interviews, other
+    /// scores) before the next show starts; null = this sport's default (<see cref="DefaultPostgame"/>).
+    /// </summary>
+    public int? PostgameMinutes { get; set; }
+
+    /// <summary>Postgame coverage by sport: NBC's Sunday Night Football ran 24 minutes after the final (2026-11-15).</summary>
+    public static int DefaultPostgame(string kind) => kind switch
+    {
+        Overruns.SportKinds.Nfl => 25,
+        Overruns.SportKinds.CollegeFootball => 15,
+        _ => 10
+    };
+
+    public static SportExtra[] Defaults() => new[]
+    {
+        new SportExtra { Kind = Overruns.SportKinds.Nfl, Minutes = 45 },
+        new SportExtra { Kind = Overruns.SportKinds.CollegeFootball, Minutes = 60 },
+        new SportExtra { Kind = Overruns.SportKinds.Basketball, Minutes = 30 },
+        new SportExtra { Kind = Overruns.SportKinds.Hockey, Minutes = 30 },
+        new SportExtra { Kind = Overruns.SportKinds.Baseball, Minutes = 60 },
+        new SportExtra { Kind = Overruns.SportKinds.Soccer, Minutes = 15 },
+        new SportExtra { Kind = Overruns.SportKinds.Other, Minutes = 30 },
+    };
+}
+
+/// <summary>What a late game does to the shows after it on one channel.</summary>
+public class ChannelOverrun
+{
+    /// <summary>Library channel id ("N" format).</summary>
+    public string ChannelId { get; set; } = string.Empty;
+
+    /// <summary>"shift", "next" or "joins".</summary>
+    public string Mode { get; set; } = PluginConfiguration.ChannelShift;
 }

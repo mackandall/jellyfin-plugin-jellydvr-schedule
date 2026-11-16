@@ -358,6 +358,11 @@
     r.defer = true;
     r.src = '/JellyDvrSchedule/web/rules.js';
     document.head.appendChild(r);
+    // Sports overruns marks in the guide.
+    var o = document.createElement('script');
+    o.defer = true;
+    o.src = '/JellyDvrSchedule/web/overruns.js';
+    document.head.appendChild(o);
   })();
 
   log('tuners script loaded');

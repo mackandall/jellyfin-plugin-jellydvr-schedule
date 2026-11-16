@@ -119,6 +119,12 @@ public sealed class TunersController : ControllerBase
     [Produces("application/javascript")]
     public Task<ContentResult> RulesScript() => Embedded("rules.js");
 
+    /// <summary>Sports overruns marks in the Live TV guide; tuners.js loads it.</summary>
+    [HttpGet("web/overruns.js")]
+    [AllowAnonymous]
+    [Produces("application/javascript")]
+    public Task<ContentResult> OverrunsScript() => Embedded("overruns.js");
+
     private async Task<ContentResult> Embedded(string name)
     {
         var assembly = typeof(TunersController).Assembly;

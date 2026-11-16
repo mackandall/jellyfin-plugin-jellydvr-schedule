@@ -55,5 +55,14 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
                 "{0}.Configuration.alertsPage.html",
                 GetType().Namespace)
         };
+        yield return new PluginPageInfo
+        {
+            Name = "JellyDvrOverruns",
+            DisplayName = "Sports overruns",
+            EmbeddedResourcePath = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}.Configuration.overrunsPage.html",
+                GetType().Namespace)
+        };
     }
 }
