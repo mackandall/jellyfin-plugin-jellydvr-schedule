@@ -53,6 +53,8 @@ public sealed class ScheduleManager : BackgroundService
     private readonly PauseStore _pauses;
     private readonly RuleBoard _board;
     private readonly ITaskManager _taskManager;
+    private readonly TunerLayouts _tuners;
+    private readonly Alerts.AlertCenter _alerts;
     private Timer? _afterGuide;
     private DateTime _startedUtc = DateTime.UtcNow;
     private DateTime _guideRefreshedUtc = DateTime.MinValue;
@@ -75,8 +77,12 @@ public sealed class ScheduleManager : BackgroundService
         Favourites favourites,
         PauseStore pauses,
         RuleBoard board,
+        TunerLayouts tuners,
+        Alerts.AlertCenter alerts,
         ITaskManager taskManager)
     {
+        _tuners = tuners;
+        _alerts = alerts;
         _board = board;
         _pauses = pauses;
         _marks = marks;
@@ -794,14 +800,14 @@ public sealed class ScheduleManager : BackgroundService
         var horizon = now.AddDays(Math.Clamp(cfg.LookAheadDays, 1, 14));
         _store.Prune(now);
         var pinned = _store.Pins.Select(p => p.ProgramId).ToHashSet();
-        var capacity = cfg.TunerInputs > 0 ? cfg.TunerInputs : JellyfinTunerCount(_config);
-        var plan = new SchedulePlan { CreatedUtc = now, Mode = cfg.Mode, Capacity = capacity };
+        var tuners = await _tuners.GetAsync(ct).ConfigureAwait(false);
+        var plan = new SchedulePlan { CreatedUtc = now, Mode = cfg.Mode, Capacity = tuners.TotalInputs, Tuners = tuners.Describe() };
 
         var seriesTimers = (await LiveTv.GetSeriesTimers(new SeriesTimerQuery(), ct).ConfigureAwait(false)).Items;
         plan.Series = OrderedEntries(cfg, seriesTimers, _pauses.Pauses);
-        if (capacity <= 0)
+        if (!tuners.HasLimit)
         {
-            plan.Warning = "The tuner count is unlimited in Jellyfin; set \"Tuner inputs\" so conflicts can be found.";
+            plan.Warning = "The tuner count is unlimited in Jellyfin; set the tuner inputs so conflicts can be found.";
         }
 
         var buffers = LiveBufferTimerIds();
@@ -864,7 +870,7 @@ public sealed class ScheduleManager : BackgroundService
         }
 
         plan.Decisions = ConflictPlanner.Plan(
-            recordings, capacity, cfg.MoveToOtherAiring, Alternatives,
+            recordings, tuners, cfg.MoveToOtherAiring, Alternatives,
             cfg.RecordEachEpisodeOnce, cfg.KeepCopy == PluginConfiguration.KeepFirstRun, restorable);
         return plan;
     }
@@ -1287,6 +1293,10 @@ public sealed class ScheduleManager : BackgroundService
                 _logger.LogInformation(
                     "Recording conflict: {Action} {Title} at {Start:u} on {Channel}{To}",
                     record.Action, record.Title, record.Start, record.Channel, record.MovedTo is null ? string.Empty : " → " + record.MovedTo);
+                if (d.Kind == DecisionKind.Skip)
+                {
+                    await AlertSkippedAsync(d, timer, ct).ConfigureAwait(false);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -1295,6 +1305,43 @@ public sealed class ScheduleManager : BackgroundService
             }
 
             Remember(record);
+        }
+    }
+
+    internal static string SkippedKey(Guid programId) => "skip:" + programId.ToString("N");
+
+    private static string AlertWhen(DateTime utc) => Alerts.AlertCenter.When(utc);
+
+    // Tells the TVs / phone that a recording was taken off the schedule, so a skip never goes unnoticed.
+    private async Task AlertSkippedAsync(Decision d, TimerInfoDto timer, CancellationToken ct)
+    {
+        try
+        {
+            var tuners = await _tuners.GetAsync(ct).ConfigureAwait(false);
+            var device = tuners.NameFor(d.Recording.ChannelId);
+            var inputs = tuners.InputsFor(d.Recording.ChannelId);
+            var others = d.Competing.Where(c => c != d.Recording).Select(c => c.Title).Distinct().ToList();
+            var cfg = Config;
+            await _alerts.RaiseAsync(
+                new Alerts.AlertReport
+                {
+                    Kind = Alerts.AlertKinds.Skipped,
+                    Key = SkippedKey(d.Recording.ProgramId),
+                    Title = $"{d.Recording.Title} won't record",
+                    Text = $"All {inputs} {device} inputs are taken {AlertWhen(d.SlotStart)}–{d.SlotEnd.ToLocalTime():h:mm tt} by "
+                        + (others.Count == 0 ? "other recordings" : string.Join(", ", others)) + ".",
+                    Next = cfg.RestoreSkipped
+                        ? "It goes back on the schedule by itself if a tuner frees up."
+                        : "Record something else instead, or raise this show's priority.",
+                    Where = d.Recording.ChannelName,
+                    AiredUtc = timer.StartDate,
+                    ProgramId = d.Recording.ProgramId
+                },
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not raise the skipped-recording alert for {Title}", d.Recording.Title);
         }
     }
 
@@ -1324,6 +1371,10 @@ public sealed class ScheduleManager : BackgroundService
             _store.RemoveOutcomes(new[] { r.ProgramId });
             record.Ok = true;
             _logger.LogInformation("Recording conflict cleared: restored {Title} at {Start:u} on {Channel}", r.Title, record.Start, r.ChannelName);
+            await _alerts.ResolveAsync(
+                SkippedKey(r.ProgramId),
+                $"{r.Title} fits again: it will record ({r.ChannelName}, {AlertWhen(record.Start)}).",
+                ct: ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1379,6 +1430,9 @@ public sealed class ScheduleManager : BackgroundService
         public string Mode { get; set; } = PluginConfiguration.ModePreview;
 
         public int Capacity { get; set; }
+
+        /// <summary>Inputs per tuner device ("HDHomeRun 4 · BroadcastHub 5").</summary>
+        public string Tuners { get; set; } = string.Empty;
 
         public int Scheduled { get; set; }
 

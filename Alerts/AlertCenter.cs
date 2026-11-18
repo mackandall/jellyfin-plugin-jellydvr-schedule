@@ -30,7 +30,10 @@ public static class AlertKinds
     /// <summary>No new guide data for a while.</summary>
     public const string Guide = "guide";
 
-    public static readonly string[] All = { Failed, Short, Tuner, Space, Guide };
+    /// <summary>A recording taken off the schedule because a tuner device had no free input.</summary>
+    public const string Skipped = "skipped";
+
+    public static readonly string[] All = { Failed, Short, Tuner, Space, Guide, Skipped };
 }
 
 /// <summary>A problem reported to <see cref="AlertCenter"/> (also the shape of an inbox file).</summary>

@@ -795,9 +795,13 @@ public sealed class OverrunWatcher : BackgroundService
             return;
         }
 
-        var capacity = cfg.TunerInputs > 0 ? cfg.TunerInputs : ScheduleManager.JellyfinTunerCount(_serviceProvider.GetRequiredService<MediaBrowser.Common.Configuration.IConfigurationManager>());
-        var busy = _active.Current().Count;
-        if (capacity > 0 && busy >= capacity)
+        // The follow-up needs an input on the channel's own tuner device (it already has one if
+        // the game's recording is still holding the channel).
+        var tuners = await _serviceProvider.GetRequiredService<TunerLayouts>().GetAsync(ct).ConfigureAwait(false);
+        var pool = tuners.PoolOf(next.ChannelId);
+        var capacity = tuners.InputsOf(pool);
+        var busyChannels = _active.Current().Select(a => a.ChannelId).Where(id => tuners.PoolOf(id) == pool).ToHashSet();
+        if (capacity > 0 && !busyChannels.Contains(next.ChannelId) && busyChannels.Count >= capacity)
         {
             w.State = "nofollowup";
             w.Note = "No free tuner for the follow-up";

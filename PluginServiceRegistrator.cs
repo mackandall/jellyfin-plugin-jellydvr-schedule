@@ -24,6 +24,7 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<RuleBoard>();
         serviceCollection.AddSingleton<GuideMarks>();
         serviceCollection.AddSingleton<ActiveRecordings>();
+        serviceCollection.AddSingleton<TunerLayouts>();
         serviceCollection.AddSingleton<Favourites>();
         serviceCollection.AddSingleton<ScheduleManager>();
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<ScheduleManager>());

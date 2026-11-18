@@ -310,7 +310,7 @@
     box.appendChild(el('h2', 'margin:0 0 .4em;font-size:1.4em;', 'All tuners are busy'));
     box.appendChild(el('div', 'opacity:.85;margin-bottom:1em;',
       (status.RequestedChannel ? status.RequestedChannel + " can't start: " : '') + 'all ' + status.Capacity
-      + ' tuner inputs are in use. You can watch one of these channels (it costs no extra tuner), or try again when one frees up.'));
+      + (status.Device ? ' ' + status.Device : '') + ' tuner inputs are in use. You can watch one of these channels (it costs no extra tuner), or try again when one frees up.'));
 
     var first = null;
     (status.Busy || []).forEach(function (b) {

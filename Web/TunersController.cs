@@ -32,9 +32,11 @@ public sealed class TunersController : ControllerBase
     private readonly LiveViewers _viewers;
     private readonly ActiveRecordings _active;
     private readonly IConfigurationManager _config;
+    private readonly Schedule.TunerLayouts _tuners;
 
-    public TunersController(IServiceProvider serviceProvider, ILibraryManager libraryManager, IApplicationPaths paths, LiveViewers viewers, ActiveRecordings active, IConfigurationManager config)
+    public TunersController(IServiceProvider serviceProvider, ILibraryManager libraryManager, IApplicationPaths paths, LiveViewers viewers, ActiveRecordings active, IConfigurationManager config, Schedule.TunerLayouts tuners)
     {
+        _tuners = tuners;
         _config = config;
         _active = active;
         _serviceProvider = serviceProvider;
@@ -49,10 +51,9 @@ public sealed class TunersController : ControllerBase
     public IActionResult Tuners([FromQuery] Guid? channelId)
     {
         // Answered while a client waits to start a channel: no ILiveTvManager.GetTimers (seconds).
-        // Tuner inputs if set, else Jellyfin's tuner count (as the schedule itself does): a fresh
-        // install leaves it at 0, which read as "no limit" and so never as full.
-        var inputs = Plugin.Instance?.Configuration.TunerInputs ?? 0;
-        var capacity = inputs > 0 ? inputs : Schedule.ScheduleManager.JellyfinTunerCount(_config);
+        // Inputs as the schedule counts them: per tuner device (the requested channel's device),
+        // or one total.
+        var tuners = _tuners.Current();
         var buffers = LiveBufferTimerIds();
         var timers = _active.Current();
 
@@ -90,15 +91,27 @@ public sealed class TunersController : ControllerBase
 
         var list = busy.Values.OrderBy(b => b.EndsUtc ?? DateTime.MaxValue).ToList();
         var requested = channelId is { } cid ? _libraryManager.GetItemById(cid) as LiveTvChannel : null;
+        // With a channel: its device's inputs and what holds them. Without: the busiest device.
+        var pool = requested is not null
+            ? tuners.PoolOf(requested.Id)
+            : list.GroupBy(b => tuners.PoolOf(b.ChannelId))
+                .Where(g => tuners.InputsOf(g.Key) > 0)
+                .OrderByDescending(g => (double)g.Count() / tuners.InputsOf(g.Key))
+                .Select(g => g.Key)
+                .FirstOrDefault() ?? tuners.DefaultPool;
+        var capacity = tuners.InputsOf(pool);
+        var onDevice = list.Where(b => tuners.PoolOf(b.ChannelId) == pool).ToList();
         return Ok(new
         {
             Capacity = capacity,
-            InUse = list.Count,
+            Device = tuners.Pool(pool)?.Name,
+            InUse = onDevice.Count,
             // Watching the requested channel needs an input only if nothing has it open already.
-            Full = capacity > 0 && list.Count >= capacity && (requested is null || !busy.ContainsKey(requested.Id)),
+            Full = capacity > 0 && onDevice.Count >= capacity && (requested is null || !busy.ContainsKey(requested.Id)),
             RequestedChannel = requested?.Name,
             IsChannel = requested is not null,
-            Busy = list
+            Busy = onDevice,
+            BusyElsewhere = list.Count - onDevice.Count
         });
     }
 

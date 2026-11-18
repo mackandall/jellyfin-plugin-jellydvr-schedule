@@ -55,7 +55,7 @@ public sealed record Decision(
     PlannedRecording? KeptCopy = null);
 
 /// <summary>
-/// Finds the times when more recordings are scheduled than there are tuner inputs and decides,
+/// Finds the times when more recordings are scheduled on a tuner device than it has inputs and decides,
 /// lowest priority first, which recordings give way: moved to another airing of the same
 /// episode when one fits, otherwise skipped. Recordings on the same channel at the same time
 /// share one input. Pure logic, no Jellyfin calls.
@@ -73,7 +73,7 @@ public static class ConflictPlanner
 
     public static List<Decision> Plan(
         IReadOnlyList<PlannedRecording> recordings,
-        int capacity,
+        TunerLayout tuners,
         bool moveToOtherAiring,
         Func<PlannedRecording, IEnumerable<Airing>> alternatives,
         bool recordEachEpisodeOnce = false,
@@ -105,7 +105,7 @@ public static class ConflictPlanner
             }
         }
 
-        if (capacity <= 0)
+        if (!tuners.HasLimit)
         {
             return decisions;
         }
@@ -114,7 +114,7 @@ public static class ConflictPlanner
         var usedAirings = new HashSet<Guid>(active.Select(r => r.ProgramId));
         for (var guard = 0; guard < 200; guard++)
         {
-            if (FirstOverload(active, capacity, DateTime.MinValue, DateTime.MaxValue) is not { } slot)
+            if (FirstOverload(active, tuners, DateTime.MinValue, DateTime.MaxValue) is not { } slot)
             {
                 break;
             }
@@ -155,7 +155,7 @@ public static class ConflictPlanner
                         Locked = false
                     };
                     var trial = active.Append(candidate).ToList();
-                    if (FirstOverload(trial, capacity, candidate.Start, candidate.End) is null)
+                    if (FirstOverload(trial, tuners, candidate.Start, candidate.End) is null)
                     {
                         moveTo = airing;
                         active.Add(candidate);
@@ -178,7 +178,7 @@ public static class ConflictPlanner
             }
 
             var trial = active.Append(r).ToList();
-            if (FirstOverload(trial, capacity, r.Start, r.End) is null)
+            if (FirstOverload(trial, tuners, r.Start, r.End) is null)
             {
                 active.Add(r);
                 decisions.Add(new Decision(DecisionKind.Restore, r, null, r.Start, r.End, Array.Empty<PlannedRecording>()));
@@ -188,9 +188,12 @@ public static class ConflictPlanner
         return decisions;
     }
 
-    /// <summary>The first stretch of time (within [from, to)) needing more inputs than there are.</summary>
+    /// <summary>
+    /// The first stretch of time (within [from, to)) when some tuner device needs more inputs than
+    /// it has; the members are the recordings on that device then.
+    /// </summary>
     public static (DateTime Start, DateTime End, List<PlannedRecording> Members)? FirstOverload(
-        IReadOnlyList<PlannedRecording> recordings, int capacity, DateTime from, DateTime to)
+        IReadOnlyList<PlannedRecording> recordings, TunerLayout tuners, DateTime from, DateTime to)
     {
         var points = recordings.SelectMany(r => new[] { r.Start, r.End })
             .Where(t => t > from && t < to)
@@ -211,10 +214,10 @@ public static class ConflictPlanner
             var a = points[i];
             var b = points[i + 1];
             var members = recordings.Where(r => r.Start < b && r.End > a).ToList();
-            // Same channel at the same time shares one input.
-            if (members.Select(r => r.ChannelId).Distinct().Count() > capacity)
+            // Same channel at the same time shares one input; devices don't share inputs.
+            if (tuners.Overloaded(members.Select(r => r.ChannelId)) is { } pool)
             {
-                return (a, b, members);
+                return (a, b, members.Where(r => tuners.PoolOf(r.ChannelId) == pool).ToList());
             }
         }
 

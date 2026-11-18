@@ -92,6 +92,12 @@
                                 <td class="da-c"><input type="checkbox" data-to="Phone" aria-label="Stuck tuner on the phone"></td>
                                 <td class="da-c"><input type="checkbox" data-to="Email" aria-label="Stuck tuner by email"></td>
                             </tr>
+                            <tr data-kind="skipped">
+                                <td>Recording skipped: no free tuner<div class="da-note">The schedule took it off because its tuner device had no input free (Schedule page)</div></td>
+                                <td class="da-c"><input type="checkbox" data-to="Tv" aria-label="Skipped recordings on the TV"></td>
+                                <td class="da-c"><input type="checkbox" data-to="Phone" aria-label="Skipped recordings on the phone"></td>
+                                <td class="da-c"><input type="checkbox" data-to="Email" aria-label="Skipped recordings by email"></td>
+                            </tr>
                             <tr data-kind="space">
                                 <td>Recordings drive nearly full<div class="da-note">Below <input id="DaDiskGb" class="da-text da-small" type="number" min="1" max="10000" aria-label="Free space warning in GB"> GB free</div></td>
                                 <td class="da-c"><input type="checkbox" data-to="Tv" aria-label="Drive space on the TV"></td>
@@ -229,7 +235,7 @@
     <script type="text/javascript">
         (function () {
             var pluginId = "7c1dd9fc-123a-477b-b646-e735ed726d58";
-            var kinds = ["failed", "short", "tuner", "space", "guide"];
+            var kinds = ["failed", "short", "tuner", "skipped", "space", "guide"];
             var page = document.querySelector("#DvrAlertsPage");
             var config = null;
 
@@ -334,7 +340,7 @@
                 return c;
             }
 
-            var kindNames = { failed: "Didn't record", short: "Short", tuner: "Tuner stuck", space: "Drive space", guide: "Guide" };
+            var kindNames = { failed: "Didn't record", short: "Short", tuner: "Tuner stuck", skipped: "Skipped", space: "Drive space", guide: "Guide" };
             function loadRecent() {
                 ApiClient.getJSON(ApiClient.getUrl("JellyDvrSchedule/Alerts", { days: 30 })).then(function (r) {
                     var rows = (r.Open || []).concat(r.Closed || []);

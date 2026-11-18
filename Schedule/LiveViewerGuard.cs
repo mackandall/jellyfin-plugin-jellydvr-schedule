@@ -46,6 +46,7 @@ public sealed class LiveViewerGuard : BackgroundService
     private readonly LiveViewers _viewers;
     private readonly ScheduleManager _manager;
     private readonly OutcomeStore _store;
+    private readonly TunerLayouts _tuners;
 
     // (timer id, session id) already warned / stopped, with when (forgotten after a day).
     private readonly Dictionary<string, DateTime> _warned = new(StringComparer.Ordinal);
@@ -61,8 +62,10 @@ public sealed class LiveViewerGuard : BackgroundService
         IApplicationPaths paths,
         LiveViewers viewers,
         ScheduleManager manager,
-        OutcomeStore store)
+        OutcomeStore store,
+        TunerLayouts tuners)
     {
+        _tuners = tuners;
         _logger = logger;
         _serviceProvider = serviceProvider;
         _sessionManager = sessionManager;
@@ -107,7 +110,7 @@ public sealed class LiveViewerGuard : BackgroundService
     private async Task CheckAsync(CancellationToken ct)
     {
         var cfg = Config;
-        var capacity = cfg.TunerInputs;
+        var tuners = await _tuners.GetAsync(ct).ConfigureAwait(false);
         var viewers = _viewers.Current();
         var now = DateTime.UtcNow;
         Forget(now);
@@ -117,7 +120,7 @@ public sealed class LiveViewerGuard : BackgroundService
         var channelsKey = string.Join(",", viewers.Select(v => v.ChannelId).Distinct().OrderBy(id => id));
         var viewersChanged = channelsKey != _lastViewerChannels;
         _lastViewerChannels = channelsKey;
-        if (cfg.Mode != PluginConfiguration.ModeActive || capacity <= 0)
+        if (cfg.Mode != PluginConfiguration.ModeActive || !tuners.HasLimit)
         {
             return;
         }
@@ -155,6 +158,14 @@ public sealed class LiveViewerGuard : BackgroundService
 
         foreach (var (timer, start) in due)
         {
+            // Only channels on this recording's tuner device compete with it for inputs.
+            var pool = tuners.PoolOf(timer.ChannelId);
+            var capacity = tuners.InputsOf(pool);
+            if (capacity <= 0)
+            {
+                continue;
+            }
+
             // Inputs taken when this recording starts: recordings still running then, the ones due
             // before it, its own channel, and the channels people are watching.
             var recordingChannels = timers
@@ -162,13 +173,14 @@ public sealed class LiveViewerGuard : BackgroundService
                 .Select(t => t.ChannelId)
                 .Concat(due.TakeWhile(d => d.Timer != timer).Select(d => d.Timer.ChannelId))
                 .Append(timer.ChannelId)
+                .Where(id => tuners.PoolOf(id) == pool)
                 .ToHashSet();
             if (recordingChannels.Count > capacity)
             {
                 continue; // recordings alone don't fit: the conflict planner's job
             }
 
-            var viewerChannels = viewers.Select(v => v.ChannelId).Where(id => !recordingChannels.Contains(id)).Distinct().ToList();
+            var viewerChannels = viewers.Select(v => v.ChannelId).Where(id => !recordingChannels.Contains(id) && tuners.PoolOf(id) == pool).Distinct().ToList();
             var excess = recordingChannels.Count + viewerChannels.Count - capacity;
             if (excess <= 0)
             {

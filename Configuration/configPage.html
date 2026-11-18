@@ -84,7 +84,21 @@
                             <option value="active">Active: move and skip recordings for real</option>
                         </select>
                     </div>
-                    <div class="inputContainer">
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="DsCounting">Count tuner inputs</label>
+                        <select is="emby-select" id="DsCounting" class="emby-select-withcolor emby-select">
+                            <option value="device">Per tuner device: channels only compete with channels on the same device</option>
+                            <option value="total">As one total for every channel</option>
+                        </select>
+                    </div>
+                    <div id="DsDevicesBox" style="margin-bottom:1.5em;">
+                        <div class="fieldDescription" style="margin-bottom:.5em;">Inputs each device can record at once. Leave a box empty to use what the device reports (HDHomeRun-type devices), else Jellyfin's tuner count; 0 = no limit.</div>
+                        <table style="width:100%;border-collapse:collapse;">
+                            <thead><tr style="text-align:left;opacity:.7;"><th style="padding:.3em;">Device</th><th>Channels</th><th>Device says</th><th>Plan with</th></tr></thead>
+                            <tbody id="DsDevices"><tr><td colspan="4" style="padding:.3em;opacity:.7;">Loading…</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div class="inputContainer" id="DsInputsBox">
                         <label class="inputLabel inputLabelUnfocused" for="DsInputs">Tuner inputs that can record at once (0 = use Jellyfin's tuner count)</label>
                         <input id="DsInputs" type="number" min="0" max="64" is="emby-input" />
                     </div>
@@ -258,8 +272,8 @@
                 if (!plan) { page.querySelector("#DsSummary").textContent = "Not checked yet. Use Check now."; return; }
                 var dups = plan.Decisions.filter(function (d) { return d.Kind === "Duplicate"; }).length;
                 var todo = plan.Decisions.filter(function (d) { return d.Kind === "Move" || d.Kind === "Skip"; }).length;
-                page.querySelector("#DsSummary").textContent = plan.Scheduled + " recording(s) in the next days · " + plan.Capacity +
-                    " input(s) · " + (todo ? todo + " conflict(s) to resolve" : "no conflicts") + (dups ? " · " + dups + " duplicate(s) to drop" : "") +
+                page.querySelector("#DsSummary").textContent = plan.Scheduled + " recording(s) in the next days · " + (plan.Tuners ? "inputs: " + plan.Tuners : plan.Capacity + " input(s)") +
+                    " · " + (todo ? todo + " conflict(s) to resolve" : "no conflicts") + (dups ? " · " + dups + " duplicate(s) to drop" : "") +
                     (plan.Mode === "active" ? "" : " · preview: nothing changed") + " · checked " + new Date(plan.CreatedUtc).toLocaleString();
                 page.querySelector("#DsWarning").textContent = plan.Warning || "";
                 var body = page.querySelector("#DsDecisions");
@@ -336,6 +350,41 @@
             }
 
             function load() { return api("GET", "JellyDvrSchedule/Status").then(render); }
+
+            var deviceSettings = [];
+            function showCounting() {
+                var perDevice = page.querySelector("#DsCounting").value === "device";
+                page.querySelector("#DsDevicesBox").style.display = perDevice ? "" : "none";
+                page.querySelector("#DsInputsBox").style.display = perDevice ? "none" : "";
+            }
+            function loadDevices() {
+                return api("GET", "JellyDvrSchedule/TunerDevices?rescan=true").then(function (r) {
+                    var body = page.querySelector("#DsDevices");
+                    body.innerHTML = "";
+                    (r.Devices || []).forEach(function (d) {
+                        var set = deviceSettings.filter(function (x) { return x.HostId === d.HostId; })[0];
+                        var value = set && set.Inputs !== 0 ? (set.Inputs < 0 ? 0 : set.Inputs) : "";
+                        var said = d.DeviceInputs != null ? d.DeviceInputs : d.JellyfinInputs;
+                        var saidText = said > 0 ? String(said) : "no limit";
+                        if (d.DeviceInputs != null && d.DeviceInputs !== d.JellyfinInputs) { saidText += " (Jellyfin has " + (d.JellyfinInputs > 0 ? d.JellyfinInputs : "no limit") + ")"; }
+                        else if (d.DeviceInputs == null) { saidText += " (Jellyfin's count)"; }
+                        var tr = document.createElement("tr");
+                        tr.style.borderTop = "1px solid rgba(128,128,128,.2)";
+                        tr.innerHTML = '<td style="padding:.3em;">' + esc(d.Name) + '</td><td>' + esc(d.Channels) + '</td><td>' +
+                            esc(saidText) + '</td><td><input type="number" min="0" max="64" style="width:5em;" data-host="' +
+                            esc(d.HostId) + '" aria-label="Inputs for ' + esc(d.Name) + '" placeholder="' + esc(said > 0 ? said : "no limit") + '" value="' + esc(value) + '"></td>';
+                        body.appendChild(tr);
+                    });
+                    if (!body.children.length) { body.innerHTML = '<tr><td colspan="4" style="padding:.3em;opacity:.7;">No tuner devices in Jellyfin.</td></tr>'; }
+                });
+            }
+            function readDevices() {
+                return Array.prototype.map.call(page.querySelectorAll("#DsDevices input[data-host]"), function (i) {
+                    var v = i.value.trim();
+                    return { HostId: i.getAttribute("data-host"), Inputs: v === "" ? 0 : (parseInt(v, 10) > 0 ? parseInt(v, 10) : -1) };
+                }).filter(function (d) { return d.Inputs !== 0; });
+            }
+            page.querySelector("#DsCounting").addEventListener("change", showCounting);
             function run() { return api("POST", "JellyDvrSchedule/Run").then(load); }
 
             page.addEventListener("pageshow", function () {
@@ -344,6 +393,10 @@
                 ApiClient.getPluginConfiguration(pluginUniqueId).then(function (c) {
                     page.querySelector("#DsMode").value = c.Mode || "preview";
                     page.querySelector("#DsInputs").value = c.TunerInputs || 0;
+                    page.querySelector("#DsCounting").value = c.TunerCounting === "total" ? "total" : "device";
+                    deviceSettings = c.TunerDevices || [];
+                    showCounting();
+                    loadDevices();
                     page.querySelector("#DsDays").value = c.LookAheadDays || 7;
                     page.querySelector("#DsInterval").value = c.CheckIntervalMinutes || 30;
                     page.querySelector("#DsOneOff").checked = c.OneOffAboveSeries !== false;
@@ -392,6 +445,9 @@
                 ApiClient.getPluginConfiguration(pluginUniqueId).then(function (c) {
                     c.Mode = page.querySelector("#DsMode").value;
                     c.TunerInputs = parseInt(page.querySelector("#DsInputs").value, 10) || 0;
+                    c.TunerCounting = page.querySelector("#DsCounting").value;
+                    c.TunerDevices = readDevices();
+                    deviceSettings = c.TunerDevices;
                     c.LookAheadDays = parseInt(page.querySelector("#DsDays").value, 10) || 7;
                     c.CheckIntervalMinutes = parseInt(page.querySelector("#DsInterval").value, 10) || 30;
                     c.OneOffAboveSeries = page.querySelector("#DsOneOff").checked;

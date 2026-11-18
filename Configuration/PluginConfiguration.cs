@@ -11,8 +11,20 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>"preview": only show conflicts and what would be done. "active": move / skip recordings.</summary>
     public string Mode { get; set; } = ModePreview;
 
-    /// <summary>How many recordings can stream at once (0 = use Jellyfin's tuner count).</summary>
+    public const string CountPerDevice = "device";
+    public const string CountTotal = "total";
+
+    /// <summary>
+    /// "device": each tuner device (Live TV › tuner devices) has its own inputs and its channels
+    /// only compete with each other. "total": every channel shares <see cref="TunerInputs"/>.
+    /// </summary>
+    public string TunerCounting { get; set; } = CountPerDevice;
+
+    /// <summary>"total" counting: how many recordings can stream at once (0 = Jellyfin's tuner count).</summary>
     public int TunerInputs { get; set; }
+
+    /// <summary>"device" counting: inputs per device where it differs from Jellyfin's tuner count.</summary>
+    public TunerDeviceSetting[] TunerDevices { get; set; } = Array.Empty<TunerDeviceSetting>();
 
     /// <summary>How far ahead to look for conflicts (days).</summary>
     public int LookAheadDays { get; set; } = 7;
@@ -223,6 +235,16 @@ public class PluginConfiguration : BasePluginConfiguration
 }
 
 /// <summary>Where one kind of problem is sent.</summary>
+/// <summary>One tuner device's inputs, overriding Jellyfin's tuner count for it.</summary>
+public class TunerDeviceSetting
+{
+    /// <summary>Jellyfin's tuner host id.</summary>
+    public string HostId { get; set; } = string.Empty;
+
+    /// <summary>Inputs to plan with (0 = Jellyfin's tuner count; -1 = no limit).</summary>
+    public int Inputs { get; set; }
+}
+
 public class AlertRoute
 {
     public string Kind { get; set; } = string.Empty;

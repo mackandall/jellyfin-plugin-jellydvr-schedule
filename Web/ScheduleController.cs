@@ -27,9 +27,11 @@ public sealed class ScheduleController : ControllerBase
     private readonly RecordingStartWatchdog _watchdog;
     private readonly RecordingStallWatchdog _stalls;
     private readonly LiveViewers _viewers;
+    private readonly TunerLayouts _tuners;
 
-    public ScheduleController(ScheduleManager manager, OutcomeStore store, ILibraryManager libraryManager, LiveViewerGuard guard, LiveViewers viewers, RecordingStartWatchdog watchdog, RecordingStallWatchdog stalls)
+    public ScheduleController(ScheduleManager manager, OutcomeStore store, ILibraryManager libraryManager, LiveViewerGuard guard, LiveViewers viewers, RecordingStartWatchdog watchdog, RecordingStallWatchdog stalls, TunerLayouts tuners)
     {
+        _tuners = tuners;
         _guard = guard;
         _watchdog = watchdog;
         _stalls = stalls;
@@ -53,6 +55,32 @@ public sealed class ScheduleController : ControllerBase
         NotStarted = _watchdog.Recent.ToList(),
         Stalled = _stalls.RecentNotes()
     });
+
+    /// <summary>Jellyfin's tuner devices with their channel counts and the inputs planned with (settings page).</summary>
+    [HttpGet("TunerDevices")]
+    [Authorize(Policy = Policies.RequiresElevation)]
+    public async Task<IActionResult> TunerDevices([FromQuery] bool rescan, CancellationToken cancellationToken)
+    {
+        if (rescan)
+        {
+            _tuners.Invalidate();
+        }
+
+        var layout = await _tuners.GetAsync(cancellationToken).ConfigureAwait(false);
+        return Ok(new
+        {
+            Summary = layout.Describe(),
+            Devices = layout.Pools.Where(p => p.Id != TunerLayout.OtherPool).Select(p => new
+            {
+                HostId = p.Id,
+                p.Name,
+                p.JellyfinInputs,
+                p.DeviceInputs,
+                p.Inputs,
+                p.Channels
+            })
+        });
+    }
 
     [HttpPost("Run")]
     [Authorize(Policy = Policies.RequiresElevation)]
@@ -333,6 +361,7 @@ public sealed class ScheduleController : ControllerBase
         p.Reason,
         p.Mode,
         p.Capacity,
+        p.Tuners,
         p.Scheduled,
         p.Warning,
         p.Series,
