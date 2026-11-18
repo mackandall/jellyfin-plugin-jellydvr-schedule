@@ -92,7 +92,7 @@
                         </select>
                     </div>
                     <div id="DsDevicesBox" style="margin-bottom:1.5em;">
-                        <div class="fieldDescription" style="margin-bottom:.5em;">Inputs each device can record at once. Leave a box empty to use what the device reports (HDHomeRun-type devices), else Jellyfin's tuner count; 0 = no limit.</div>
+                        <div class="fieldDescription" style="margin-bottom:.5em;">Inputs each device can record at once. <b>Use device</b> follows what the device reports (HDHomeRun-type devices), else Jellyfin's tuner count.</div>
                         <table style="width:100%;border-collapse:collapse;">
                             <thead><tr style="text-align:left;opacity:.7;"><th style="padding:.3em;">Device</th><th>Channels</th><th>Device says</th><th>Plan with</th></tr></thead>
                             <tbody id="DsDevices"><tr><td colspan="4" style="padding:.3em;opacity:.7;">Loading…</td></tr></tbody>
@@ -363,25 +363,32 @@
                     body.innerHTML = "";
                     (r.Devices || []).forEach(function (d) {
                         var set = deviceSettings.filter(function (x) { return x.HostId === d.HostId; })[0];
-                        var value = set && set.Inputs !== 0 ? (set.Inputs < 0 ? 0 : set.Inputs) : "";
                         var said = d.DeviceInputs != null ? d.DeviceInputs : d.JellyfinInputs;
                         var saidText = said > 0 ? String(said) : "no limit";
                         if (d.DeviceInputs != null && d.DeviceInputs !== d.JellyfinInputs) { saidText += " (Jellyfin has " + (d.JellyfinInputs > 0 ? d.JellyfinInputs : "no limit") + ")"; }
                         else if (d.DeviceInputs == null) { saidText += " (Jellyfin's count)"; }
+                        // A choice list, not a number box: "follow the device" is the first choice, and
+                        // "no limit" has to be picked on purpose (0 in a number box meant no limit).
+                        var chosen = !set || set.Inputs === 0 ? "" : (set.Inputs < 0 ? "-1" : String(set.Inputs));
+                        var top = Math.max(16, set && set.Inputs > 0 ? set.Inputs : 0, said > 0 ? said : 0);
+                        var opts = '<option value="">Use device (' + esc(said > 0 ? said : "no limit") + ')</option>';
+                        for (var n = 1; n <= top; n++) { opts += '<option value="' + n + '">' + n + '</option>'; }
+                        opts += '<option value="-1">No limit</option>';
                         var tr = document.createElement("tr");
                         tr.style.borderTop = "1px solid rgba(128,128,128,.2)";
                         tr.innerHTML = '<td style="padding:.3em;">' + esc(d.Name) + '</td><td>' + esc(d.Channels) + '</td><td>' +
-                            esc(saidText) + '</td><td><input type="number" min="0" max="64" style="width:5em;" data-host="' +
-                            esc(d.HostId) + '" aria-label="Inputs for ' + esc(d.Name) + '" placeholder="' + esc(said > 0 ? said : "no limit") + '" value="' + esc(value) + '"></td>';
+                            esc(saidText) + '</td><td><select is="emby-select" style="min-width:9em;" data-host="' +
+                            esc(d.HostId) + '" aria-label="Inputs for ' + esc(d.Name) + '">' + opts + '</select></td>';
+                        tr.querySelector("select").value = chosen;
                         body.appendChild(tr);
                     });
                     if (!body.children.length) { body.innerHTML = '<tr><td colspan="4" style="padding:.3em;opacity:.7;">No tuner devices in Jellyfin.</td></tr>'; }
                 });
             }
             function readDevices() {
-                return Array.prototype.map.call(page.querySelectorAll("#DsDevices input[data-host]"), function (i) {
-                    var v = i.value.trim();
-                    return { HostId: i.getAttribute("data-host"), Inputs: v === "" ? 0 : (parseInt(v, 10) > 0 ? parseInt(v, 10) : -1) };
+                return Array.prototype.map.call(page.querySelectorAll("#DsDevices select[data-host]"), function (i) {
+                    var v = parseInt(i.value, 10);
+                    return { HostId: i.getAttribute("data-host"), Inputs: isNaN(v) ? 0 : v };
                 }).filter(function (d) { return d.Inputs !== 0; });
             }
             page.querySelector("#DsCounting").addEventListener("change", showCounting);
