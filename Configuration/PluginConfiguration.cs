@@ -26,6 +26,13 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>"device" counting: inputs per device where it differs from Jellyfin's tuner count.</summary>
     public TunerDeviceSetting[] TunerDevices { get; set; } = Array.Empty<TunerDeviceSetting>();
 
+    /// <summary>
+    /// "device" counting: also write each device's planned inputs into Jellyfin's own tuner count
+    /// (the limit Jellyfin enforces), which Jellyfin never re-reads from the device and its dashboard
+    /// can't edit for HDHomeRun-type tuners.
+    /// </summary>
+    public bool SyncJellyfinTunerCounts { get; set; }
+
     /// <summary>How far ahead to look for conflicts (days).</summary>
     public int LookAheadDays { get; set; } = 7;
 

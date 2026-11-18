@@ -97,6 +97,10 @@
                             <thead><tr style="text-align:left;opacity:.7;"><th style="padding:.3em;">Device</th><th>Channels</th><th>Device says</th><th>Plan with</th></tr></thead>
                             <tbody id="DsDevices"><tr><td colspan="4" style="padding:.3em;opacity:.7;">Loading…</td></tr></tbody>
                         </table>
+                        <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:1em;">
+                            <label><input is="emby-checkbox" type="checkbox" id="DsSyncCounts" /><span>Keep Jellyfin's own tuner counts the same as this table</span></label>
+                            <div class="fieldDescription checkboxFieldDescription">Jellyfin refuses a stream once a device has its tuner count open, but it never re-reads that count from an HDHomeRun-type device after the tuner is added, and its dashboard has no box for it. With this on, Jellyfin's count is set to each device's Plan with value (Use device = what the device says; No limit = none) whenever they differ: on Save and every 15 minutes. Devices that report nothing and have Use device are left alone.</div>
+                        </div>
                     </div>
                     <div class="inputContainer" id="DsInputsBox">
                         <label class="inputLabel inputLabelUnfocused" for="DsInputs">Tuner inputs that can record at once (0 = use Jellyfin's tuner count)</label>
@@ -410,6 +414,7 @@
                     page.querySelector("#DsMove").checked = c.MoveToOtherAiring !== false;
                     page.querySelector("#DsOnce").checked = c.RecordEachEpisodeOnce !== false;
                     page.querySelector("#DsRestore").checked = c.RestoreSkipped !== false;
+                    page.querySelector("#DsSyncCounts").checked = !!c.SyncJellyfinTunerCounts;
                     page.querySelector("#DsMoveRunning").checked = c.MoveRunningEpisode !== false;
                     favourites = (c.Favourites || []).map(function (f) { return Object.assign({}, f); });
                     renderFavourites();
@@ -461,6 +466,7 @@
                     c.MoveToOtherAiring = page.querySelector("#DsMove").checked;
                     c.RecordEachEpisodeOnce = page.querySelector("#DsOnce").checked;
                     c.RestoreSkipped = page.querySelector("#DsRestore").checked;
+                    c.SyncJellyfinTunerCounts = page.querySelector("#DsSyncCounts").checked;
                     c.MoveRunningEpisode = page.querySelector("#DsMoveRunning").checked;
                     c.Favourites = favourites.filter(function (f) { return (f.Title || "").trim(); }).map(function (f) {
                         return { Id: f.Id || newId(), Title: f.Title.trim(), Match: f.Match || "title", Channels: f.Channels || "", NewOnly: !!f.NewOnly,
@@ -476,6 +482,9 @@
                     ApiClient.updatePluginConfiguration(pluginUniqueId, c).then(function (result) {
                         Dashboard.processPluginConfigurationUpdateResult(result);
                         series = [];
+                        // Re-read the devices now: applies "Keep Jellyfin's own tuner counts" at once
+                        // and shows the counts Jellyfin has after it.
+                        loadDevices();
                         run();
                     });
                 });

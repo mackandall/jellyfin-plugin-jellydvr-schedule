@@ -201,6 +201,7 @@ public sealed class TunerLayouts
             // What each HDHomeRun-type device says it has now (discover.json): Jellyfin keeps the
             // count from when the tuner was added, and a dashboard re-save sets it to 0.
             var reported = new Dictionary<string, int>(StringComparer.Ordinal);
+            var answered = new HashSet<string>(StringComparer.Ordinal);
             var names = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var h in (_config.GetConfiguration<LiveTvOptions>("livetv").TunerHosts ?? Array.Empty<TunerHostInfo>())
                 .Where(h => string.Equals(h.Type, "hdhomerun", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(h.Url)))
@@ -218,6 +219,7 @@ public sealed class TunerLayouts
                     if (doc.RootElement.TryGetProperty("TunerCount", out var tc) && tc.TryGetInt32(out var n) && n > 0)
                     {
                         reported[h.Id] = n;
+                        answered.Add(h.Id);
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -237,6 +239,7 @@ public sealed class TunerLayouts
 
             _reported = reported;
             _reportedNames = names;
+            await SyncJellyfinCountsAsync(manager, answered).ConfigureAwait(false);
 
             if (hostOf.Count > 0 || _hostOfChannel.Count == 0)
             {
@@ -274,6 +277,56 @@ public sealed class TunerLayouts
         finally
         {
             _lock.Release();
+        }
+    }
+
+    // "Keep Jellyfin's own tuner counts the same": Jellyfin enforces the TunerCount stored with each
+    // tuner, copies it from an HDHomeRun only when it discovers one on its own, and its dashboard
+    // can't edit it. Written only when it differs, and a device's own count only when it answered
+    // this scan (an unreachable device never changes Jellyfin's limit).
+    private async Task SyncJellyfinCountsAsync(ITunerHostManager? manager, HashSet<string> answered)
+    {
+        var cfg = Config;
+        if (manager is null || !cfg.SyncJellyfinTunerCounts
+            || !string.Equals(cfg.TunerCounting, PluginConfiguration.CountPerDevice, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        foreach (var h in _config.GetConfiguration<LiveTvOptions>("livetv").TunerHosts ?? Array.Empty<TunerHostInfo>())
+        {
+            if (string.IsNullOrEmpty(h.Id))
+            {
+                continue;
+            }
+
+            var set = (cfg.TunerDevices ?? Array.Empty<TunerDeviceSetting>()).FirstOrDefault(d => string.Equals(d.HostId, h.Id, StringComparison.OrdinalIgnoreCase));
+            int? target = set is { Inputs: > 0 } ? set.Inputs
+                : set is { Inputs: < 0 } ? 0
+                : answered.Contains(h.Id) ? _reported[h.Id]
+                : null;
+            if (target is null || target.Value == h.TunerCount)
+            {
+                continue;
+            }
+
+            var name = _reportedNames.GetValueOrDefault(h.Id) ?? (string.IsNullOrWhiteSpace(h.FriendlyName) ? h.Url : h.FriendlyName);
+            try
+            {
+                var copy = System.Text.Json.JsonSerializer.Deserialize<TunerHostInfo>(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(h))!;
+                copy.TunerCount = target.Value;
+                await manager.SaveTunerHost(copy, false).ConfigureAwait(false);
+                _logger.LogInformation(
+                    "Jellyfin's tuner count for {Device}: {Old} -> {New} ({Why})",
+                    name,
+                    h.TunerCount == 0 ? "no limit" : h.TunerCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    target.Value == 0 ? "no limit" : target.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    set is { Inputs: not 0 } ? "Plan with" : "the device says");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not set Jellyfin's tuner count for {Device}", name);
+            }
         }
     }
 
