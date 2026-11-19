@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Events;
+using Jellyfin.Plugin.DvrSchedule.Alerts;
 using Jellyfin.Plugin.DvrSchedule.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.LiveTv;
@@ -64,6 +65,7 @@ public sealed class RestartResume : BackgroundService
     private readonly IRecordingsManager _recordings;
     private readonly ScheduleManager _manager;
     private readonly RecordingStartWatchdog _alerts;
+    private readonly AlertCenter _center;
     private readonly object _lock = new();
     private readonly List<string> _recent = new();
     private Dictionary<string, Entry> _log = new(StringComparer.Ordinal);
@@ -74,8 +76,10 @@ public sealed class RestartResume : BackgroundService
         IApplicationPaths paths,
         IRecordingsManager recordings,
         ScheduleManager manager,
-        RecordingStartWatchdog alerts)
+        RecordingStartWatchdog alerts,
+        AlertCenter center)
     {
+        _center = center;
         _logger = logger;
         _serviceProvider = serviceProvider;
         _paths = paths;
@@ -117,6 +121,18 @@ public sealed class RestartResume : BackgroundService
         public DateTime EndUtc { get; set; }
 
         public DateTime NotedUtc { get; set; }
+
+        /// <summary>The file being recorded when last seen (to tell how much a restart cost).</summary>
+        public string Path { get; set; } = string.Empty;
+    }
+
+    private enum Outcome
+    {
+        Waiting,
+        Recording,
+        Stopped,
+        Over,
+        GaveUp
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -196,7 +212,8 @@ public sealed class RestartResume : BackgroundService
                     continue;
                 }
 
-                if (_log.TryGetValue(id, out var e) && e.EndUtc == end && e.StartUtc == start)
+                var path = _recordings.GetActiveRecordingPath(id) ?? string.Empty;
+                if (_log.TryGetValue(id, out var e) && e.EndUtc == end && e.StartUtc == start && (path.Length == 0 || path == e.Path))
                 {
                     continue;
                 }
@@ -209,7 +226,8 @@ public sealed class RestartResume : BackgroundService
                     Channel = t.ChannelName ?? string.Empty,
                     StartUtc = start,
                     EndUtc = end, // follows extensions (sports overruns)
-                    NotedUtc = e?.NotedUtc ?? now
+                    NotedUtc = e?.NotedUtc ?? now,
+                    Path = path.Length > 0 ? path : e?.Path ?? string.Empty
                 };
                 changed = true;
             }
@@ -240,29 +258,59 @@ public sealed class RestartResume : BackgroundService
                 _logger.LogInformation("Restart resume: {Name} ended at {End:u} while Jellyfin was down; left to Episode History", e.Name, e.EndUtc);
             }
 
-            if (pending.Count == 0 || !Config.ResumeAfterRestart)
+            if (pending.Count == 0)
             {
+                return;
+            }
+
+            if (!Config.ResumeAfterRestart)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(60), ct).ConfigureAwait(false);
+                foreach (var e in pending.Where(e => _recordings.GetActiveRecordingPath(e.TimerId) is null && IsLogged(e)))
+                {
+                    await TellFailedAsync(e, "Recording the rest after a restart is turned off (JellyDVR Schedule › Alerts).", ct).ConfigureAwait(false);
+                }
+
                 return;
             }
 
             await WaitForCleanupAsync(ct).ConfigureAwait(false);
             var resumes = new Dictionary<string, int>(StringComparer.Ordinal);
             var until = DateTime.UtcNow + CheckFor;
-            while (pending.Count > 0 && DateTime.UtcNow < until)
+            while (pending.Count > 0)
             {
+                var last = DateTime.UtcNow >= until;
                 var states = TimerStates();
                 foreach (var e in pending.ToList())
                 {
-                    if (await CheckOneAsync(e, states, resumes, ct).ConfigureAwait(false))
+                    var outcome = await CheckOneAsync(e, states, resumes, ct).ConfigureAwait(false);
+                    switch (outcome)
                     {
-                        pending.Remove(e);
+                        case Outcome.Recording:
+                            await TellResumedAsync(e, resumes.ContainsKey(e.TimerId), ct).ConfigureAwait(false);
+                            pending.Remove(e);
+                            break;
+                        case Outcome.GaveUp:
+                            await TellFailedAsync(e, $"It was scheduled again {resumes.GetValueOrDefault(e.TimerId)} times and still didn't record. The tuner may not be answering.", ct).ConfigureAwait(false);
+                            pending.Remove(e);
+                            break;
+                        case Outcome.Stopped:
+                        case Outcome.Over:
+                            pending.Remove(e); // a stop by hand, or Episode History's "came out short" covers it
+                            break;
+                        case Outcome.Waiting when last:
+                            await TellFailedAsync(e, $"It still isn't recording {CheckFor.TotalMinutes:0} minutes after Jellyfin started. The tuner may not be answering.", ct).ConfigureAwait(false);
+                            pending.Remove(e);
+                            break;
                     }
                 }
 
-                if (pending.Count > 0)
+                if (pending.Count == 0 || last)
                 {
-                    await Task.Delay(CheckEvery, ct).ConfigureAwait(false);
+                    break;
                 }
+
+                await Task.Delay(CheckEvery, ct).ConfigureAwait(false);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -271,48 +319,55 @@ public sealed class RestartResume : BackgroundService
         }
     }
 
-    /// <summary>One logged recording after startup; true when nothing more is to be done for it.</summary>
-    private async Task<bool> CheckOneAsync(Entry e, Dictionary<string, string> states, Dictionary<string, int> resumes, CancellationToken ct)
+    private bool IsLogged(Entry e)
     {
-        var now = DateTime.UtcNow;
-        bool stillLogged;
         lock (_lock)
         {
-            stillLogged = _log.ContainsKey(e.TimerId);
+            return _log.ContainsKey(e.TimerId);
         }
+    }
 
-        if (!stillLogged || e.EndUtc - now < MinLeft)
+    /// <summary>One logged recording after startup: where it stands, scheduling it again when Jellyfin gave up on it.</summary>
+    private async Task<Outcome> CheckOneAsync(Entry e, Dictionary<string, string> states, Dictionary<string, int> resumes, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        if (!IsLogged(e))
         {
-            return true; // stopped by someone since, or about over
+            return Outcome.Stopped; // stopped or cancelled by someone since
         }
 
         if (_recordings.GetActiveRecordingPath(e.TimerId) is not null)
         {
-            return true; // recording again (Jellyfin resumed it, or we did)
+            return Outcome.Recording; // Jellyfin resumed it, or we did
+        }
+
+        if (e.EndUtc - now < MinLeft)
+        {
+            return Outcome.Over;
         }
 
         var status = states.TryGetValue(e.TimerId, out var s) ? s : "gone";
         if (status is "Cancelled")
         {
-            return true; // stopped on purpose
+            return Outcome.Stopped;
         }
 
         if (status is "New" or "InProgress")
         {
-            return false; // Jellyfin is starting or retrying it; look again shortly
+            return Outcome.Waiting; // Jellyfin is starting or retrying it
         }
 
         // Completed (clean shutdown), Error, or the timer is gone: Jellyfin gave up on it.
         if (!Guid.TryParse(e.ProgramId, out var programId))
         {
-            return true;
+            return Outcome.GaveUp;
         }
 
         var done = resumes.TryGetValue(e.TimerId, out var n) ? n : 0;
         if (done >= MaxResumes)
         {
             Note($"{e.Name}: scheduled again {done} times since the restart and still not recording; given up");
-            return true;
+            return Outcome.GaveUp;
         }
 
         resumes[e.TimerId] = done + 1;
@@ -337,8 +392,75 @@ public sealed class RestartResume : BackgroundService
             Note($"{e.Name}: couldn't be resumed after the restart ({ex.Message})");
         }
 
-        return false; // look again: it should be recording by the next check
+        // Jellyfin starts it within a second or two; the recorder shows up by the next look (or not).
+        await Task.Delay(TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
+        return _recordings.GetActiveRecordingPath(e.TimerId) is not null ? Outcome.Recording : Outcome.Waiting;
     }
+
+    private static string AlertKey(Entry e) => "restart:" + e.TimerId + "|" + e.StartUtc.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private AlertReport Report(Entry e, string text) => new()
+    {
+        Kind = AlertKinds.Short,
+        Key = AlertKey(e),
+        Title = e.Name + " was interrupted by a Jellyfin restart",
+        Text = text,
+        Where = string.IsNullOrEmpty(e.Channel) ? null : e.Channel,
+        AiredUtc = e.StartUtc,
+        ProgramId = Guid.TryParse(e.ProgramId, out var pid) ? pid : null,
+        Source = "JellyDVR Schedule"
+    };
+
+    // Recording again: listed as a problem that fixed itself, sent nowhere (no pop-up, phone or email).
+    private async Task TellResumedAsync(Entry e, bool byUs, CancellationToken ct)
+    {
+        var lost = Lost(e);
+        var who = byUs ? "JellyDVR Schedule started it again" : "Jellyfin picked it up again itself";
+        await _center.RaiseAsync(Report(e, "The recording stopped when Jellyfin went down."), ct, send: false).ConfigureAwait(false);
+        await _center.ResolveAsync(
+            AlertKey(e),
+            (lost is { } l ? $"Recording again after {Describe(l)}" : "Recording again") + $"; {who}. The pieces are joined when the programme ends.",
+            true,
+            ct).ConfigureAwait(false);
+    }
+
+    // Not recording again: an open problem, sent like the other recording problems.
+    private async Task TellFailedAsync(Entry e, string why, CancellationToken ct)
+    {
+        Note($"{e.Name}: interrupted by the restart and not recording; alert raised");
+        await _center.RaiseAsync(
+            Report(e, $"The recording stopped when Jellyfin went down and hasn't started again. {why} The programme runs until {e.EndUtc.ToLocalTime():h:mm tt}."),
+            ct).ConfigureAwait(false);
+    }
+
+    // From the last write to the old file to the start of the new one.
+    private TimeSpan? Lost(Entry e)
+    {
+        try
+        {
+            var now = _recordings.GetActiveRecordingPath(e.TimerId);
+            if (string.IsNullOrEmpty(e.Path) || !File.Exists(e.Path) || string.IsNullOrEmpty(now) || now == e.Path)
+            {
+                return null;
+            }
+
+            var stopped = File.GetLastWriteTimeUtc(e.Path);
+            var started = File.GetCreationTimeUtc(now);
+            if (started.Year < 2000 || started < stopped)
+            {
+                started = DateTime.UtcNow;
+            }
+
+            var gap = started - stopped;
+            return gap > TimeSpan.Zero && gap < TimeSpan.FromHours(12) ? gap : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static string Describe(TimeSpan t) => t.TotalSeconds < 90 ? $"{t.TotalSeconds:0} s" : $"{t.TotalMinutes:0} min";
 
     private async Task WaitForCleanupAsync(CancellationToken ct)
     {
