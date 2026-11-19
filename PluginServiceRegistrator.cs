@@ -35,6 +35,8 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<RecordingStartWatchdog>());
         serviceCollection.AddSingleton<RecordingStallWatchdog>();
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<RecordingStallWatchdog>());
+        serviceCollection.AddSingleton<RestartResume>();
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<RestartResume>());
         serviceCollection.AddSingleton<Scoreboard>();
         serviceCollection.AddSingleton<OverrunStore>();
         serviceCollection.AddSingleton<FollowUpJoiner>();

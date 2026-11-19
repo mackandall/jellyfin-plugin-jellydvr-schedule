@@ -203,6 +203,13 @@
                         <div class="da-row"><span>at most</span><input id="DaStallMax" class="da-text da-small" type="number" min="1" max="10" aria-label="Most retunes"><span>times per programme</span></div>
                     </div>
                     <div class="da-card">
+                        <h3>Recordings a restart stopped</h3>
+                        <div class="da-note">A restart, crash or power cut stops the recordings in progress, and Jellyfin doesn't always pick them up again (a clean restart marks them finished).</div>
+                        <label class="da-check"><input type="checkbox" id="DaResume"><span>Record the rest when Jellyfin is back</span></label>
+                        <div class="da-note">Each recording is logged as it starts. After any restart, one whose programme is still on and isn't recording is started again as a second file; Episode History joins the pieces when the programme ends. Recordings stopped by hand stay stopped.</div>
+                        <div class="da-note" style="margin-top:.6em;">If the programme ended while Jellyfin was down, Episode History reports the recording as short and, with "Record again automatically" on, records the next airing.</div>
+                    </div>
+                    <div class="da-card">
                         <h3>Short and failed recordings</h3>
                         <div class="da-note">Episode History decides when a finished recording is too short (below its "recorded" percentage) or failed outright, records it again at the next airing, and reports it here.</div>
                         <div class="da-row" style="margin-top:.8em;"><a is="emby-linkbutton" class="button-link" href="#/configurationpage?name=Episode%20History">Episode History settings →</a></div>
@@ -292,6 +299,7 @@
                 $("#DaStuckAlert").checked = c.StuckRecordingAlert !== false;
                 $("#DaStuckSeconds").value = c.StuckRecordingSeconds == null ? 90 : c.StuckRecordingSeconds;
                 $("#DaStallWatch").checked = c.StallWatch !== false;
+                $("#DaResume").checked = c.ResumeAfterRestart !== false;
                 $("#DaStallSeconds").value = c.StallSeconds == null ? 90 : c.StallSeconds;
                 $("#DaStallRetune").checked = c.StallRetune !== false;
                 $("#DaStallMax").value = c.StallMaxRetunes == null ? 3 : c.StallMaxRetunes;
@@ -334,6 +342,7 @@
                 c.StuckRecordingAlert = $("#DaStuckAlert").checked;
                 c.StuckRecordingSeconds = num("#DaStuckSeconds", 90);
                 c.StallWatch = $("#DaStallWatch").checked;
+                c.ResumeAfterRestart = $("#DaResume").checked;
                 c.StallSeconds = num("#DaStallSeconds", 90);
                 c.StallRetune = $("#DaStallRetune").checked;
                 c.StallMaxRetunes = num("#DaStallMax", 3);

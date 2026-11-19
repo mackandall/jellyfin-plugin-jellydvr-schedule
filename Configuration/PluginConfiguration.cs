@@ -104,6 +104,13 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool StallRetune { get; set; } = true;
 
+    /// <summary>
+    /// Pick up recordings a restart, crash or power cut interrupted and Jellyfin didn't resume (a clean
+    /// shutdown marks them finished). Recordings are logged as they start; after any start of Jellyfin
+    /// the rest of a programme still on is recorded as a second file, which Episode History joins.
+    /// </summary>
+    public bool ResumeAfterRestart { get; set; } = true;
+
     /// <summary>Most times one programme's recording is tuned again after stalling.</summary>
     public int StallMaxRetunes { get; set; } = 3;
 
