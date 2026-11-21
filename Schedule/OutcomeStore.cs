@@ -153,6 +153,26 @@ public sealed class OutcomeStore
         }
     }
 
+    /// <summary>
+    /// Forgets outcomes of series recordings that no longer exist: a deleted series recording's
+    /// skipped and moved airings would otherwise keep their guide marks (Episode History's 🟧 / ↪)
+    /// until they aired. Outcomes without a series (favourites, one-offs) are kept.
+    /// </summary>
+    public int RemoveOrphans(IEnumerable<string> liveSeriesTimerIds)
+    {
+        var live = liveSeriesTimerIds.Select(PauseStore.Plain).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        lock (_lock)
+        {
+            var n = _outcomes.RemoveAll(o => !string.IsNullOrEmpty(o.SeriesTimerId) && !live.Contains(PauseStore.Plain(o.SeriesTimerId)));
+            if (n > 0)
+            {
+                Save(_outcomesFile, _outcomes);
+            }
+
+            return n;
+        }
+    }
+
     public void AddPin(Pin pin)
     {
         lock (_lock)

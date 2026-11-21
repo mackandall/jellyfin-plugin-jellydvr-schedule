@@ -123,6 +123,8 @@ public sealed class ScheduleManager : BackgroundService
         LiveTv.SeriesTimerCreated += OnScheduleChanged;
         LiveTv.SeriesTimerCreated += OnSeriesTimerCreated;
         LiveTv.TimerCancelled += OnScheduleChanged;
+        // A deleted series recording: re-plan, which also drops its skipped / moved airings' marks.
+        LiveTv.SeriesTimerCancelled += OnScheduleChanged;
         try
         {
             await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken).ConfigureAwait(false);
@@ -142,6 +144,7 @@ public sealed class ScheduleManager : BackgroundService
             LiveTv.SeriesTimerCreated -= OnScheduleChanged;
             LiveTv.SeriesTimerCreated -= OnSeriesTimerCreated;
             LiveTv.TimerCancelled -= OnScheduleChanged;
+            LiveTv.SeriesTimerCancelled -= OnScheduleChanged;
             _soon.Dispose();
             _taskManager.TaskCompleted -= OnTaskCompleted;
             _afterGuide.Dispose();
@@ -804,6 +807,12 @@ public sealed class ScheduleManager : BackgroundService
         var plan = new SchedulePlan { CreatedUtc = now, Mode = cfg.Mode, Capacity = tuners.TotalInputs, Tuners = tuners.Describe() };
 
         var seriesTimers = (await LiveTv.GetSeriesTimers(new SeriesTimerQuery(), ct).ConfigureAwait(false)).Items;
+        var orphans = _store.RemoveOrphans(seriesTimers.Select(s => s.Id));
+        if (orphans > 0)
+        {
+            _logger.LogInformation("Forgot {Count} skipped or moved airing(s) of series recordings that were deleted", orphans);
+        }
+
         plan.Series = OrderedEntries(cfg, seriesTimers, _pauses.Pauses);
         if (!tuners.HasLimit)
         {
