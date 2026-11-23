@@ -32,6 +32,13 @@ namespace Jellyfin.Plugin.DvrSchedule.Schedule;
 /// Jellyfin re-arms the same timer (or makes a new one) and starts it at once as a second file,
 /// which Episode History joins onto the first when the programme ends;</item>
 /// <item>cancelled: someone stopped it on purpose, so it stays stopped.</item>
+/// <item>stopped before Jellyfin went down: not interrupted by the restart, so left stopped. A stop is
+/// kept in the log until the programme is over (Jellyfin marks a stopped recording Completed, the same
+/// as one a shutdown cut off, and the recorder winds down for a few seconds after the stop, so the
+/// log can't tell the two apart from the timer alone). As a second check, the log notes when each
+/// recording was last seen recording: one that had already stopped while Jellyfin was still running
+/// is never started again (seen 2026-11-21: FBI: Most Wanted, stopped by hand at 1:22 AM, was
+/// started again after a restart at 1:26).</item>
 /// </list>
 /// A programme that ended while Jellyfin was down is left to Episode History, which reports the
 /// recording as short and, with its "Record again automatically" setting, records the next airing.
@@ -52,6 +59,15 @@ public sealed class RestartResume : BackgroundService
     private static readonly TimeSpan CheckFor = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan CheckEvery = TimeSpan.FromSeconds(30);
 
+    // How often a logged recording's "last seen" times are written down.
+    private static readonly TimeSpan SeenEvery = TimeSpan.FromMinutes(1);
+
+    // Last seen recording this long before the log's last look: it had stopped while Jellyfin was up.
+    private static readonly TimeSpan StoppedBefore = TimeSpan.FromMinutes(2);
+
+    // Recording again this long after a stop: started again on purpose, so watched again.
+    private static readonly TimeSpan StopSettles = TimeSpan.FromMinutes(1);
+
     // Most times one recording is scheduled again after one start of Jellyfin.
     private const int MaxResumes = 3;
 
@@ -68,6 +84,10 @@ public sealed class RestartResume : BackgroundService
     private readonly AlertCenter _center;
     private readonly object _lock = new();
     private readonly List<string> _recent = new();
+
+    // Recordings still being checked after this start of Jellyfin: their "last seen" times stay as
+    // they were before the restart (they aren't recording because of it).
+    private readonly HashSet<string> _resuming = new(StringComparer.Ordinal);
     private Dictionary<string, Entry> _log = new(StringComparer.Ordinal);
 
     public RestartResume(
@@ -124,6 +144,22 @@ public sealed class RestartResume : BackgroundService
 
         /// <summary>The file being recorded when last seen (to tell how much a restart cost).</summary>
         public string Path { get; set; } = string.Empty;
+
+        /// <summary>When someone stopped or cancelled it (kept until the programme is over, so it stays stopped).</summary>
+        public DateTime? StoppedUtc { get; set; }
+
+        /// <summary>The last look at it (about once a minute while Jellyfin runs).</summary>
+        public DateTime? CheckedUtc { get; set; }
+
+        /// <summary>When it was last seen recording, at that look.</summary>
+        public DateTime? RecordingUtc { get; set; }
+
+        /// <summary>
+        /// It had stopped recording while Jellyfin was still running: seen recording, then seen not
+        /// recording a while later, so a restart didn't cut it off.
+        /// </summary>
+        public bool StoppedBeforeShutdown(TimeSpan grace) =>
+            RecordingUtc is { } rec && CheckedUtc is { } chk && chk - rec > grace;
     }
 
     private enum Outcome
@@ -142,7 +178,13 @@ public sealed class RestartResume : BackgroundService
         lock (_lock)
         {
             _log = Load();
-            before = new Dictionary<string, Entry>(_log, StringComparer.Ordinal);
+            // Copies: the log's own entries keep changing while the check runs.
+            before = _log.ToDictionary(kv => kv.Key, kv => Copy(kv.Value), StringComparer.Ordinal);
+            var now = DateTime.UtcNow;
+            foreach (var e in before.Values.Where(e => e.StartUtc <= now && e.EndUtc > now))
+            {
+                _resuming.Add(e.TimerId);
+            }
         }
 
         LiveTv.TimerCancelled += OnTimerCancelled;
@@ -185,8 +227,9 @@ public sealed class RestartResume : BackgroundService
 
         lock (_lock)
         {
-            if (_log.Remove(id))
+            if (_log.TryGetValue(id, out var entry) && entry.StoppedUtc is null)
             {
+                entry.StoppedUtc = DateTime.UtcNow;
                 Save();
             }
         }
@@ -213,7 +256,19 @@ public sealed class RestartResume : BackgroundService
                 }
 
                 var path = _recordings.GetActiveRecordingPath(id) ?? string.Empty;
-                if (_log.TryGetValue(id, out var e) && e.EndUtc == end && e.StartUtc == start && (path.Length == 0 || path == e.Path))
+                if (_log.TryGetValue(id, out var e) && e.StoppedUtc is { } stopped)
+                {
+                    // Stopped on purpose: stays out, even while the recorder winds down, unless it
+                    // records a new file well after the stop (recorded again on purpose).
+                    if (path.Length == 0 || path == e.Path || now - stopped < StopSettles)
+                    {
+                        continue;
+                    }
+
+                    e = null;
+                }
+
+                if (e is not null && e.EndUtc == end && e.StartUtc == start && (path.Length == 0 || path == e.Path))
                 {
                     continue;
                 }
@@ -227,8 +282,27 @@ public sealed class RestartResume : BackgroundService
                     StartUtc = start,
                     EndUtc = end, // follows extensions (sports overruns)
                     NotedUtc = e?.NotedUtc ?? now,
-                    Path = path.Length > 0 ? path : e?.Path ?? string.Empty
+                    Path = path.Length > 0 ? path : e?.Path ?? string.Empty,
+                    CheckedUtc = e?.CheckedUtc,
+                    RecordingUtc = e?.RecordingUtc
                 };
+                changed = true;
+            }
+
+            // Last seen: when each recording on the log was last looked at, and last seen recording.
+            foreach (var e in _log.Values.Where(x => x.StoppedUtc is null && x.StartUtc <= now && x.EndUtc > now && !_resuming.Contains(x.TimerId)))
+            {
+                if (e.CheckedUtc is { } at && now - at < SeenEvery)
+                {
+                    continue;
+                }
+
+                e.CheckedUtc = now;
+                if (_recordings.GetActiveRecordingPath(e.TimerId) is not null)
+                {
+                    e.RecordingUtc = now;
+                }
+
                 changed = true;
             }
 
@@ -251,8 +325,16 @@ public sealed class RestartResume : BackgroundService
         try
         {
             var now = DateTime.UtcNow;
-            var pending = before.Values.Where(e => e.StartUtc <= now && e.EndUtc > now).ToList();
-            foreach (var e in before.Values.Where(e => e.StartUtc <= now && e.EndUtc <= now && e.EndUtc > now - TimeSpan.FromDays(1)))
+            foreach (var e in before.Values.Where(e => e.StartUtc <= now && e.EndUtc > now && e.StoppedUtc is null && e.StoppedBeforeShutdown(StoppedBefore)))
+            {
+                Note($"{e.Name}: had stopped before Jellyfin went down (last recording {e.RecordingUtc!.Value.ToLocalTime():h:mm tt}); left stopped");
+                _logger.LogInformation(
+                    "Restart resume: {Name} had stopped recording at {Recording:u}, before Jellyfin went down (still running at {Checked:u}); left stopped",
+                    e.Name, e.RecordingUtc, e.CheckedUtc);
+            }
+
+            var pending = before.Values.Where(e => e.StartUtc <= now && e.EndUtc > now && e.StoppedUtc is null && !e.StoppedBeforeShutdown(StoppedBefore)).ToList();
+            foreach (var e in before.Values.Where(e => e.StartUtc <= now && e.EndUtc <= now && e.EndUtc > now - TimeSpan.FromDays(1) && e.StoppedUtc is null))
             {
                 Note($"{e.Name}: the programme ended while Jellyfin was down; Episode History reports it if it came out short");
                 _logger.LogInformation("Restart resume: {Name} ended at {End:u} while Jellyfin was down; left to Episode History", e.Name, e.EndUtc);
@@ -317,13 +399,36 @@ public sealed class RestartResume : BackgroundService
         {
             _logger.LogError(ex, "Resuming recordings after the restart failed");
         }
+        finally
+        {
+            lock (_lock)
+            {
+                _resuming.Clear();
+            }
+        }
     }
 
+    private static Entry Copy(Entry e) => new()
+    {
+        TimerId = e.TimerId,
+        ProgramId = e.ProgramId,
+        Name = e.Name,
+        Channel = e.Channel,
+        StartUtc = e.StartUtc,
+        EndUtc = e.EndUtc,
+        NotedUtc = e.NotedUtc,
+        Path = e.Path,
+        StoppedUtc = e.StoppedUtc,
+        CheckedUtc = e.CheckedUtc,
+        RecordingUtc = e.RecordingUtc
+    };
+
+    // On the log and not stopped by someone since.
     private bool IsLogged(Entry e)
     {
         lock (_lock)
         {
-            return _log.ContainsKey(e.TimerId);
+            return _log.TryGetValue(e.TimerId, out var now) && now.StoppedUtc is null;
         }
     }
 
