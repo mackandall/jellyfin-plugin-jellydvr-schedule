@@ -190,7 +190,7 @@ public sealed class ScheduleManager : BackgroundService
             plan.Reason = reason;
             LastPlan = plan;
             var toDo = plan.Decisions.Count(d => d.Kind != DecisionKind.Unresolvable);
-            var restores = plan.Decisions.Count(d => d.Kind == DecisionKind.Restore);
+            var restores = plan.Decisions.Count(d => d.Kind is DecisionKind.Restore or DecisionKind.Covered);
             toDo -= restores;
             if (restores > 0)
             {
@@ -1215,6 +1215,12 @@ public sealed class ScheduleManager : BackgroundService
                 continue;
             }
 
+            if (d.Kind == DecisionKind.Covered)
+            {
+                await CoveredAsync(d, ct).ConfigureAwait(false);
+                continue;
+            }
+
             var timer = timers.FirstOrDefault(t => t.Id == d.Recording.TimerId && t.Status == RecordingStatus.New);
             if (timer is null)
             {
@@ -1392,6 +1398,38 @@ public sealed class ScheduleManager : BackgroundService
         }
 
         Remember(record);
+    }
+
+    // A skipped airing whose episode now records at another time (another airing was scheduled after
+    // the skip, or the guide only later told the airings apart): no longer missed. Its outcome becomes a
+    // duplicate pointing at that airing, so it isn't retried, and its "won't record" alert clears.
+    private async Task CoveredAsync(Decision d, CancellationToken ct)
+    {
+        var r = d.Recording;
+        var kept = d.KeptCopy!;
+        var at = kept.Start + kept.PadBefore;
+        try
+        {
+            var old = _store.GetOutcome(r.ProgramId);
+            if (old is not null)
+            {
+                old.Kind = OutcomeStore.KindDuplicate;
+                old.Detail = "Recording another airing: " + kept.ChannelName + " " + LocalTime(at);
+                old.RecordedInstead = kept.ProgramId;
+                old.Time = DateTime.UtcNow;
+                _store.SetOutcome(old);
+            }
+
+            _logger.LogInformation("Skipped {Title} at {Start:u} records at another airing: {Channel} {At:u}", r.Title, r.Start + r.PadBefore, kept.ChannelName, at);
+            await _alerts.ResolveAsync(
+                SkippedKey(r.ProgramId),
+                $"{r.Title} records at another airing instead ({kept.ChannelName}, {AlertWhen(at)}).",
+                ct: ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not mark {Title} as recorded at another airing", r.Title);
+        }
     }
 
     /// <summary>Schedules one airing (re-arming Jellyfin's cancelled timer for it, if it has one).</summary>

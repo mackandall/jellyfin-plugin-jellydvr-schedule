@@ -287,6 +287,7 @@
                         : d.Kind === "Skip" ? "Skip (no other airing fits)"
                         : d.Kind === "Duplicate" ? "Drop duplicate" + (d.IsRepeat ? " (repeat)" : "") + ": recorded " + when(d.Kept.Start) + " on " + d.Kept.ChannelName
                         : d.Kind === "Restore" ? "Put back on the schedule (fits again)"
+                        : d.Kind === "Covered" ? "Stays off: records " + when(d.Kept.Start) + " on " + d.Kept.ChannelName
                         : "All already recording; nothing to do";
                     var tr = document.createElement("tr");
                     tr.style.borderTop = "1px solid rgba(128,128,128,.2)";

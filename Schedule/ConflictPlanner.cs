@@ -42,7 +42,13 @@ public enum DecisionKind
     Duplicate,
 
     /// <summary>An airing skipped earlier now fits again: put it back on the schedule.</summary>
-    Restore
+    Restore,
+
+    /// <summary>
+    /// An airing skipped earlier whose episode is now scheduled at another time: it stays off, and
+    /// is no longer a missed recording (KeptCopy is the airing that records it).
+    /// </summary>
+    Covered
 }
 
 public sealed record Decision(
@@ -172,8 +178,12 @@ public static class ConflictPlanner
         // without overloading anything (an episode already scheduled at another time stays off).
         foreach (var r in (restorable ?? Array.Empty<PlannedRecording>()).OrderByDescending(r => r.Rank).ThenBy(r => r.Start))
         {
-            if (IsEpisodeId(r.ShowId) && active.Any(a => string.Equals(a.ShowId, r.ShowId, StringComparison.OrdinalIgnoreCase)))
+            var copy = IsEpisodeId(r.ShowId)
+                ? active.Where(a => string.Equals(a.ShowId, r.ShowId, StringComparison.OrdinalIgnoreCase)).OrderBy(a => a.Start).FirstOrDefault()
+                : null;
+            if (copy is not null)
             {
+                decisions.Add(new Decision(DecisionKind.Covered, r, null, r.Start, r.End, Array.Empty<PlannedRecording>(), copy));
                 continue;
             }
 
