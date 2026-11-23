@@ -89,6 +89,12 @@ public sealed class TunersController : ControllerBase
             For(v.ChannelId).Watching.Add(string.IsNullOrEmpty(v.Device) ? v.User : v.Device);
         }
 
+        // JellyDVR Live's server Multiview: its pictures hold tuners without a playback session.
+        foreach (var m in MultiviewHeld.Current(_paths))
+        {
+            For(m.ChannelId).Watching.Add(string.IsNullOrEmpty(m.Device) ? "Multiview" : "Multiview on " + m.Device);
+        }
+
         var list = busy.Values.OrderBy(b => b.EndsUtc ?? DateTime.MaxValue).ToList();
         var requested = channelId is { } cid ? _libraryManager.GetItemById(cid) as LiveTvChannel : null;
         // With a channel: its device's inputs and what holds them. Without: the busiest device.
