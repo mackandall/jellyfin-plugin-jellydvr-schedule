@@ -219,7 +219,7 @@ public sealed class RuleBoard
         // Episodes a pause has cancelled since the snapshot are held, not upcoming.
         var heldPrograms = pauses.SelectMany(p => p.Cancelled).Select(h => h.ProgramId.ToString("N")).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var timers = snap.Timers
-            .Where(t => t.EndDate > now && !(t.Status == RecordingStatus.New && heldPrograms.Contains(PauseStore.Plain(t.ProgramId ?? string.Empty))))
+            .Where(t => (t.EndDate.AddSeconds(Math.Max(0, t.PostPaddingSeconds)) > now || t.Status == RecordingStatus.InProgress) && !(t.Status == RecordingStatus.New && heldPrograms.Contains(PauseStore.Plain(t.ProgramId ?? string.Empty))))
             .ToList();
         var order = ScheduleManager.OrderedEntries(cfg, seriesTimers, pauses)
             .Select((e, i) => (e.Id, i)).ToDictionary(x => PauseStore.Plain(x.Id), x => x.i + 1, StringComparer.OrdinalIgnoreCase);

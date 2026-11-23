@@ -67,13 +67,15 @@ public sealed class UpcomingController : ControllerBase
             }
 
             var end = Date(t, "EndDate");
-            if (end < now)
+            var id = Str(t, "Id") ?? string.Empty;
+            var recordingNow = status == "InProgress" && _recordings.GetActiveRecordingPath(id) is not null;
+            // Recorded until the listed end plus the end padding (Sports overruns lengthen a
+            // recording through its padding): a recording past its listed end is still on.
+            var until = end.AddSeconds(Math.Max(0, Int(t, "PostPaddingSeconds")));
+            if (until < now && !recordingNow)
             {
                 continue;
             }
-
-            var id = Str(t, "Id") ?? string.Empty;
-            var recordingNow = status == "InProgress" && _recordings.GetActiveRecordingPath(id) is not null;
             Guid? programId = null;
             lock (CacheLock)
             {
@@ -114,6 +116,7 @@ public sealed class UpcomingController : ControllerBase
                 IsRepeat = t.TryGetProperty("IsRepeat", out var r) && r.ValueKind == JsonValueKind.True,
                 Start = start,
                 End = end,
+                RecordsUntil = until,
                 ChannelId = channel?.Id,
                 ChannelNumber = channel?.Number,
                 ChannelName = channel?.Name,
