@@ -92,6 +92,8 @@ public sealed class AlertsController : ControllerBase
     {
         a.Id,
         a.Kind,
+        // What reported it knows it by (Episode History: "rec:" + the airing), for "Don't record again" on the TV.
+        a.Key,
         a.Title,
         a.Text,
         a.Next,
