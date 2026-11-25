@@ -101,6 +101,22 @@ public sealed class ScheduleManager : BackgroundService
 
     private ILiveTvManager LiveTv => _serviceProvider.GetRequiredService<ILiveTvManager>();
 
+    // Jellyfin's upcoming and running recordings only. Jellyfin keeps every cancelled series
+    // episode as a timer, and a plain GetTimers looks up the programme and channel of each one
+    // (hundreds, seconds of work); its status filters run before those look-ups.
+    private async Task<IReadOnlyList<TimerInfoDto>> LiveTimersAsync(CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var scheduled = (await LiveTv.GetTimers(new TimerQuery { IsScheduled = true }, ct).ConfigureAwait(false)).Items;
+        var running = (await LiveTv.GetTimers(new TimerQuery { IsActive = true }, ct).ConfigureAwait(false)).Items;
+        if (sw.ElapsedMilliseconds > 1000)
+        {
+            _logger.LogInformation("Reading upcoming recordings took {Ms} ms", sw.ElapsedMilliseconds);
+        }
+
+        return scheduled.Concat(running).OrderBy(t => t.StartDate).ToList();
+    }
+
     public SchedulePlan? LastPlan { get; private set; }
 
     public IReadOnlyList<ActionRecord> RecentActions => _recent.Reverse().ToList();
@@ -223,7 +239,7 @@ public sealed class ScheduleManager : BackgroundService
     /// </summary>
     public async Task<SchedulePlan> RecordInsteadAsync(Guid programId, OutcomeStore.Outcome? outcome, CancellationToken ct)
     {
-        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        var timers = (await LiveTimersAsync(ct).ConfigureAwait(false));
         var scheduled = timers.Any(t => Guid.TryParse(t.ProgramId, out var p) && p == programId
             && (t.Status == RecordingStatus.New || t.Status == RecordingStatus.InProgress));
         if (!scheduled)
@@ -288,7 +304,7 @@ public sealed class ScheduleManager : BackgroundService
             return;
         }
 
-        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        var timers = (await LiveTimersAsync(ct).ConfigureAwait(false));
         var hits = _favourites.Find(rules, timers);
         var settling = MarksSettling();
         var skipInLibrary = rules.Where(r => r.SkipInLibrary).Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
@@ -377,7 +393,7 @@ public sealed class ScheduleManager : BackgroundService
             return cancelled;
         }
 
-        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        var timers = (await LiveTimersAsync(ct).ConfigureAwait(false));
         foreach (var t in timers.Where(t => t.Status == RecordingStatus.New && string.IsNullOrEmpty(t.SeriesTimerId)
             && Guid.TryParse(t.ProgramId, out var p) && programs.Contains(p) && which(t)))
         {
@@ -431,7 +447,7 @@ public sealed class ScheduleManager : BackgroundService
         if (mode == PauseModeNext)
         {
             // Skip the next episode: paused until just after it starts.
-            var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+            var timers = (await LiveTimersAsync(ct).ConfigureAwait(false));
             var next = timers.Where(t => t.Status == RecordingStatus.New && PauseStore.Same(t.SeriesTimerId, series.Id) && t.StartDate > DateTime.UtcNow)
                 .Select(t => (DateTime?)t.StartDate)
                 .Concat((_pauses.Get(series.Id)?.Cancelled ?? new List<PauseStore.Held>()).Where(h => h.Start > DateTime.UtcNow).Select(h => (DateTime?)h.Start))
@@ -679,7 +695,7 @@ public sealed class ScheduleManager : BackgroundService
             return;
         }
 
-        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        var timers = (await LiveTimersAsync(ct).ConfigureAwait(false));
         foreach (var p in active)
         {
             foreach (var t in timers.Where(t => t.Status == RecordingStatus.New && PauseStore.Same(t.SeriesTimerId, p.SeriesTimerId)
@@ -791,7 +807,7 @@ public sealed class ScheduleManager : BackgroundService
     /// <summary>What the favourites (or one rule being edited) would match now, without scheduling anything.</summary>
     public async Task<List<FavouriteHit>> PreviewFavouritesAsync(IEnumerable<FavouriteRule> rules, CancellationToken ct)
     {
-        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        var timers = (await LiveTimersAsync(ct).ConfigureAwait(false));
         return _favourites.Find(rules, timers);
     }
 
@@ -820,7 +836,7 @@ public sealed class ScheduleManager : BackgroundService
         }
 
         var buffers = LiveBufferTimerIds();
-        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items
+        var timers = (await LiveTimersAsync(ct).ConfigureAwait(false))
             .Where(t => (t.Status == RecordingStatus.New && t.StartDate < horizon && t.EndDate > now) || t.Status == RecordingStatus.InProgress)
             .Where(t => !buffers.Contains(t.Id)) // JellyDVR Live buffers give way on their own
             .ToList();
@@ -990,7 +1006,7 @@ public sealed class ScheduleManager : BackgroundService
     private async Task MoveRunningEpisodesAsync(string seriesTimerId, DateTime createdUtc, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
-        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        var timers = (await LiveTimersAsync(ct).ConfigureAwait(false));
         var running = timers.Where(t => string.Equals(t.SeriesTimerId, seriesTimerId, StringComparison.OrdinalIgnoreCase)
                 && t.Status is RecordingStatus.InProgress or RecordingStatus.New
                 && t.StartDate < createdUtc.AddMinutes(-2) && t.EndDate > now.AddMinutes(2))
