@@ -132,6 +132,29 @@ public sealed class Favourites
     private readonly object _lock = new();
     private List<Created> _created;
 
+    // The guide's programmes, light, for Find (a full GetItemList of ~40k programmes took ~2 s per
+    // call). Dropped whenever a programme is added, changed (guide refresh, Episode History's marks)
+    // or removed, and after a few minutes anyway.
+    private static readonly TimeSpan ProgrammesFor = TimeSpan.FromMinutes(10);
+    private volatile ProgrammeCache? _programmes;
+
+    private sealed record ProgrammeCache(DateTime ReadUtc, List<Prog> Items);
+
+    /// <summary>What Find and EpisodeKey read of a guide programme.</summary>
+    private sealed record Prog(
+        Guid Id,
+        string Name,
+        string? EpisodeTitle,
+        string? ShowId,
+        bool IsMovie,
+        bool IsRepeat,
+        Guid ChannelId,
+        DateTime StartDate,
+        DateTime? EndDate,
+        int? ProductionYear,
+        int? ParentIndexNumber,
+        int? IndexNumber);
+
     public Favourites(ILibraryManager libraryManager, GuideMarks marks, OutcomeStore outcomes, IApplicationPaths paths, ILogger<Favourites> logger)
     {
         _libraryManager = libraryManager;
@@ -142,6 +165,40 @@ public sealed class Favourites
         Directory.CreateDirectory(dir);
         _file = Path.Combine(dir, "favourites.json");
         _created = Load();
+        libraryManager.ItemAdded += OnProgrammeChanged;
+        libraryManager.ItemUpdated += OnProgrammeChanged;
+        libraryManager.ItemRemoved += OnProgrammeChanged;
+    }
+
+    private void OnProgrammeChanged(object? sender, ItemChangeEventArgs e)
+    {
+        if (e.Item is LiveTvProgram)
+        {
+            _programmes = null;
+        }
+    }
+
+    private List<Prog> Programmes(DateTime now)
+    {
+        var cache = _programmes;
+        if (cache is null || now - cache.ReadUtc > ProgrammesFor)
+        {
+            var items = _libraryManager.GetItemList(new InternalItemsQuery
+                {
+                    IncludeItemTypes = new[] { BaseItemKind.TvProgram },
+                    MinEndDate = now
+                })
+                .OfType<LiveTvProgram>()
+                .Where(p => p.EndDate.HasValue)
+                .Select(p => new Prog(p.Id, p.Name, p.EpisodeTitle, p.ShowId, p.IsMovie, p.IsRepeat, p.ChannelId, p.StartDate, p.EndDate,
+                    p.ProductionYear, p.ParentIndexNumber, p.IndexNumber))
+                .ToList();
+            cache = new ProgrammeCache(now, items);
+            _programmes = cache;
+        }
+
+        var after = now.AddMinutes(5);
+        return cache.Items.Where(p => p.EndDate >= after).ToList();
     }
 
     /// <summary>An airing a favourite scheduled.</summary>
@@ -252,14 +309,7 @@ public sealed class Favourites
         var channels = new Dictionary<Guid, LiveTvChannel?>();
         LiveTvChannel? Channel(Guid id) => channels.TryGetValue(id, out var c) ? c : channels[id] = _libraryManager.GetItemById(id) as LiveTvChannel;
 
-        var programs = _libraryManager.GetItemList(new InternalItemsQuery
-            {
-                IncludeItemTypes = new[] { BaseItemKind.TvProgram },
-                MinEndDate = now.AddMinutes(5)
-            })
-            .OfType<LiveTvProgram>()
-            .Where(p => p.EndDate.HasValue)
-            .ToList();
+        var programs = Programmes(now);
 
         var hits = new List<FavouriteHit>();
         foreach (var rule in active)
@@ -338,7 +388,7 @@ public sealed class Favourites
 
     // What makes two airings "the same episode": a real TMS episode/movie id; else series name +
     // season/episode, or name + episode title; a generic airing (news, no episode data) is its own.
-    private static string EpisodeKey(LiveTvProgram p, GuideMarks marks)
+    private static string EpisodeKey(Prog p, GuideMarks marks)
     {
         if (ConflictPlanner.IsEpisodeId(p.ShowId))
         {
