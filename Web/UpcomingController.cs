@@ -108,6 +108,8 @@ public sealed class UpcomingController : ControllerBase
             list.Add((start, new
             {
                 TimerId = id,
+                // Jellyfin's own id for it (the /LiveTv/Timers API's); TimerId is the stored one.
+                ApiId = string.IsNullOrEmpty(id) ? null : InternalTimerId(id),
                 ProgramId = programId,
                 Name = Str(t, "Name") ?? string.Empty,
                 EpisodeTitle = Str(t, "EpisodeTitle"),
@@ -165,4 +167,8 @@ public sealed class UpcomingController : ControllerBase
 
     private static DateTime Date(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && v.TryGetDateTime(out var d) ? d.ToUniversalTime() : DateTime.MinValue;
+
+    // As Jellyfin's LiveTvDtoService.GetInternalTimerId, for its own DVR ("Emby").
+    private static string InternalTimerId(string externalId) =>
+        new Guid(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.Unicode.GetBytes(("Emby" + externalId + "4").ToLowerInvariant()))).ToString("N");
 }
