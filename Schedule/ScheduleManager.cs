@@ -101,20 +101,17 @@ public sealed class ScheduleManager : BackgroundService
 
     private ILiveTvManager LiveTv => _serviceProvider.GetRequiredService<ILiveTvManager>();
 
-    // Jellyfin's upcoming and running recordings only. Jellyfin keeps every cancelled series
-    // episode as a timer, and a plain GetTimers looks up the programme and channel of each one
-    // (hundreds, seconds of work); its status filters run before those look-ups.
+    // Jellyfin's upcoming and running recordings only (see TimerReader).
     private async Task<IReadOnlyList<TimerInfoDto>> LiveTimersAsync(CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var scheduled = (await LiveTv.GetTimers(new TimerQuery { IsScheduled = true }, ct).ConfigureAwait(false)).Items;
-        var running = (await LiveTv.GetTimers(new TimerQuery { IsActive = true }, ct).ConfigureAwait(false)).Items;
+        var list = await TimerReader.LiveAsync(_serviceProvider, ct).ConfigureAwait(false);
         if (sw.ElapsedMilliseconds > 1000)
         {
             _logger.LogInformation("Reading upcoming recordings took {Ms} ms", sw.ElapsedMilliseconds);
         }
 
-        return scheduled.Concat(running).OrderBy(t => t.StartDate).ToList();
+        return list;
     }
 
     public SchedulePlan? LastPlan { get; private set; }
@@ -753,7 +750,7 @@ public sealed class ScheduleManager : BackgroundService
             return 0;
         }
 
-        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        var timers = (await TimerReader.AllAsync(_serviceProvider, ct).ConfigureAwait(false));
         var restored = 0;
         foreach (var h in held)
         {
@@ -1212,7 +1209,7 @@ public sealed class ScheduleManager : BackgroundService
 
     private async Task ExecuteAsync(SchedulePlan plan, CancellationToken ct)
     {
-        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        var timers = (await TimerReader.AllAsync(_serviceProvider, ct).ConfigureAwait(false));
         // A recording that loses a conflict may move to an airing that was itself dropped as a
         // duplicate: then that airing just keeps its existing recording (Jellyfin reuses timer ids
         // per programme, so cancelling and re-creating it would clash).

@@ -239,7 +239,7 @@ public sealed class RestartResume : BackgroundService
     {
         var now = DateTime.UtcNow;
         var buffers = _manager.LiveBufferTimerIds();
-        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        var timers = (await TimerReader.AllAsync(_serviceProvider, ct).ConfigureAwait(false));
         lock (_lock)
         {
             var changed = false;

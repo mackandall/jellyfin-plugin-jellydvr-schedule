@@ -163,7 +163,7 @@ public sealed class RuleBoard
                 {
                     var series = (await LiveTv.GetSeriesTimers(new SeriesTimerQuery(), CancellationToken.None).ConfigureAwait(false)).Items;
                     var now = DateTime.UtcNow;
-                    var timers = (await LiveTv.GetTimers(new TimerQuery(), CancellationToken.None).ConfigureAwait(false)).Items
+                    var timers = (await TimerReader.AllAsync(_services, CancellationToken.None).ConfigureAwait(false))
                         .Where(t => (t.Status == RecordingStatus.New && t.EndDate > now) || t.Status == RecordingStatus.InProgress)
                         .ToList();
                     _snapshot = new Snapshot(DateTime.UtcNow, series, timers);

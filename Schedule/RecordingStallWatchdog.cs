@@ -215,7 +215,7 @@ public sealed class RecordingStallWatchdog : BackgroundService
     private async Task<string> RetuneAsync(ActiveRecording rec, PluginConfiguration cfg, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
-        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        var timers = (await TimerReader.AllAsync(_serviceProvider, ct).ConfigureAwait(false));
 
         // GetTimers knows a timer by its API id; the recorder by the DVR's own.
         var timer = timers.FirstOrDefault(t => string.Equals(t.ExternalId, rec.TimerId, StringComparison.Ordinal));

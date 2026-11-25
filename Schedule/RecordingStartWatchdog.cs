@@ -100,7 +100,7 @@ public sealed class RecordingStartWatchdog : BackgroundService
 
         var now = DateTime.UtcNow;
         var grace = TimeSpan.FromSeconds(Math.Clamp(cfg.StuckRecordingSeconds, 30, 1800));
-        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        var timers = (await TimerReader.AllAsync(_serviceProvider, ct).ConfigureAwait(false));
 
         // A stuck one that got going after all (the tuner was restarted): say so once.
         foreach (var t in timers.Where(t => t.Status == RecordingStatus.InProgress))

@@ -142,7 +142,7 @@ public sealed class LiveViewerGuard : BackgroundService
             : policy == PluginConfiguration.ViewersFirst ? ScheduleManager.ViewerHold - TimeSpan.FromMinutes(1) : StopLead + Tick;
 
         var buffers = LiveBufferTimerIds();
-        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items
+        var timers = (await TimerReader.AllAsync(_serviceProvider, ct).ConfigureAwait(false))
             .Where(t => !buffers.Contains(t.Id))
             .ToList();
         var due = timers

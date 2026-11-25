@@ -213,7 +213,7 @@ public sealed class OverrunWatcher : BackgroundService
             var now = DateTime.UtcNow;
             var active = cfg.OverrunMode == PluginConfiguration.ModeActive;
             var buffers = _manager.LiveBufferTimerIds();
-            var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items
+            var timers = (await TimerReader.AllAsync(_serviceProvider, ct).ConfigureAwait(false))
                 .Where(t => t.Status is RecordingStatus.New or RecordingStatus.InProgress
                     && !buffers.Contains(t.Id)
                     && t.StartDate < now.AddHours(14) && t.EndDate > now.AddMinutes(-5))
@@ -786,7 +786,7 @@ public sealed class OverrunWatcher : BackgroundService
             return;
         }
 
-        var timers = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items;
+        var timers = (await TimerReader.AllAsync(_serviceProvider, ct).ConfigureAwait(false));
         var existing = timers.FirstOrDefault(x => x.ProgramId == next.Id.ToString("N") && x.Status is RecordingStatus.New or RecordingStatus.InProgress);
         if (existing is not null)
         {
@@ -821,7 +821,7 @@ public sealed class OverrunWatcher : BackgroundService
         }
 
         await _manager.CreateTimerAsync(next.Id, pre, post, ct).ConfigureAwait(false);
-        var created = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items
+        var created = (await TimerReader.AllAsync(_serviceProvider, ct).ConfigureAwait(false))
             .FirstOrDefault(x => x.ProgramId == next.Id.ToString("N") && x.Status == RecordingStatus.New);
         if (created is null)
         {
@@ -1177,7 +1177,7 @@ public sealed class OverrunWatcher : BackgroundService
 
     private async Task<(TimerInfoDto? Timer, string Error)> ChangeableTimerAsync(string timerId, CancellationToken ct)
     {
-        var t = (await LiveTv.GetTimers(new TimerQuery(), ct).ConfigureAwait(false)).Items.FirstOrDefault(x => x.Id == timerId);
+        var t = (await TimerReader.AllAsync(_serviceProvider, ct).ConfigureAwait(false)).FirstOrDefault(x => x.Id == timerId);
         if (t is null || t.Status is not (RecordingStatus.New or RecordingStatus.InProgress))
         {
             return (null, "That recording isn't scheduled any more.");
